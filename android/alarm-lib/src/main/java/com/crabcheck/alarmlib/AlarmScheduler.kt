@@ -43,4 +43,24 @@ object AlarmScheduler {
         val clockInfo = AlarmManager.AlarmClockInfo(triggerAtEpochMs, showPi)
         alarmManager.setAlarmClock(clockInfo, operationPi)
     }
+
+    @JvmStatic
+    fun cancelExactAlarm(context: Context, alarmId: String) {
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+
+        val receiverIntent = Intent(context, AlarmReceiver::class.java).apply {
+            action = "com.crabcheck.alarmlib.ACTION_TRIGGER_ALARM_$alarmId"
+            putExtra(EXTRA_ALARM_ID, alarmId)
+        }
+
+        val operationPi = PendingIntent.getBroadcast(
+            context,
+            alarmId.hashCode(),
+            receiverIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        alarmManager.cancel(operationPi)
+        operationPi.cancel()
+    }
 }

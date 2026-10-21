@@ -13,6 +13,7 @@ import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import uniffi.crabcheck_core_ffi.ffiGetAlarm
 import uniffi.crabcheck_core_ffi.ffiRecordOutcome
+import uniffi.crabcheck_core_ffi.ffiRescheduleAfterTrigger
 
 class LockActivity : AppCompatActivity() {
 
@@ -83,8 +84,13 @@ class LockActivity : AppCompatActivity() {
     }
 
     private fun recordAndClose(dbPath: String, alarmId: String, outcome: String) {
+        val now = System.currentTimeMillis()
         try {
-            ffiRecordOutcome(dbPath, alarmId, outcome, System.currentTimeMillis())
+            ffiRecordOutcome(dbPath, alarmId, outcome, now)
+            val nextMs = ffiRescheduleAfterTrigger(dbPath, alarmId, now)
+            if (nextMs != null && nextMs > 0L) {
+                AlarmScheduler.scheduleExactAlarm(this, alarmId, nextMs)
+            }
         } catch (_: Throwable) {
             // Ignorado no spike se falhar
         }
