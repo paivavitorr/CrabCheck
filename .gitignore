@@ -1,0 +1,14 @@
+# Build outputs
+/target/
+**/build/
+**/.gradle/
+**/local.properties
+
+# Artifacts & local DBs
+/CODE_REVIEW.md
+*.apk
+*.aab
+*.aar
+*.db
+*.db-shm
+*.db-wal

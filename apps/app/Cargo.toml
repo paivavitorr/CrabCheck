@@ -1,0 +1,19 @@
+[package]
+name = "crabcheck-app"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "crabcheck-app"
+path = "src/main.rs"
+
+[dependencies]
+crabcheck-core = { workspace = true }
+crabcheck-core-ffi = { workspace = true }
+dioxus = { version = "0.6" }
+
+[target.'cfg(target_os = "android")'.dependencies]
+dioxus = { version = "0.6", features = ["mobile"] }
+jni = "0.21"
+ndk-context = "0.1"
+

@@ -1,0 +1,5 @@
+-keep class com.sun.jna.** { *; }
+-keep class * implements com.sun.jna.** { *; }
+-keep class uniffi.** { *; }
+-keep class com.crabcheck.alarmlib.** { *; }
+-dontwarn java.awt.**

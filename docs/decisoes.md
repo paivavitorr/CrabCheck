@@ -20,7 +20,7 @@ Base: [contexto.md](../contexto.md)
 | 12 | Anti-batota | **Cooldown assimétrico de 24h**: tornar um N3 mais rígido vale de imediato; baixar o nível, apagar, mudar a hora ou o objeto só vale passadas 24h. Forçar paragem ou desligar a Acessibilidade durante um alarme ativo regista FALHOU. |
 | 13 | Timeline (MVP) | Três tipos de entrada: hábito agendado, resultado (+ foto) e nota rápida em texto com `#tags`. Navegação por dia. Markdown fica para depois. |
 | 14 | Build | **AAR Kotlin próprio** (`android/alarm-lib`) + `xtask` que, depois do `dx`, injeta a dependência Gradle e as entradas do Manifest no projeto gerado. **Spike primeiro.** |
-| 15 | SDK / permissões | minSdk 29, targetSdk 35. **Onboarding obrigatório** por todas as permissões (alarme exato, full-screen intent, overlay, Acessibilidade, câmara, notificações, isenção de bateria). Sem elas não se criam hábitos N3. Um ecrã de "saúde" revalida as permissões ao abrir. |
+| 15 | SDK / permissões | minSdk 29, targetSdk 34 (com suporte a 35 quando o SDK estiver instalado). **Onboarding obrigatório** por todas as permissões (alarme exato, full-screen intent, overlay, Acessibilidade, câmara, notificações, isenção de bateria). Sem elas não se criam hábitos N3. Um ecrã de "saúde" revalida as permissões ao abrir. |
 | 16 | Preparação da fase 2 | **Supabase**. O schema já fica pronto para sync: IDs UUIDv7, timestamps UTC + fuso do hábito, `updated_at`, soft-delete com `deleted_at`, resultados append-only. |
 | 17 | Mecânica de pânico | Contagem de 3 min com o som a tocar, depois escrever uma frase de compromisso. Máx. 2 por semana; a partir daí a contagem passa a 10 min. |
 | 18 | Repositório | Cargo workspace: `crates/core`, `crates/core-ffi`, `apps/app` (Dioxus), `android/alarm-lib`, `xtask`. A lógica crítica tem testes unitários no `core`. |
@@ -64,7 +64,7 @@ stateDiagram-v2
 
 | Fase | Entregável |
 |------|------------|
-| 0 — Spike | Hello-world Dioxus Android + AAR injetado pelo `xtask` + chamada UniFFI ida e volta + `setAlarmClock` a abrir uma Activity Kotlin com o ecrã bloqueado. |
+| 0 — Spike | Hello-world Dioxus Android + AAR injetado pelo `xtask` (`cargo run -p xtask -- spike-android`) + chamada UniFFI ida e volta + `setAlarmClock` a abrir uma Activity Kotlin com o ecrã bloqueado. (**Concluído**) |
 | 1 — Core | `core` com schema, recorrência, janela, cooldown, máquina de estados e testes. |
 | 2 — Alarmes | N1/N2/N3, Foreground Service, reagendamento após reboot ou mudança de fuso, AccessibilityService, pânico. |
 | 3 — Prova | CameraX + ML Kit, catálogo curado, limiar/N frames, gravação do frame. |

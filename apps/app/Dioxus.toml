@@ -1,0 +1,7 @@
+[application]
+name = "crabcheck"
+default_platform = "mobile"
+
+[bundle]
+identifier = "com.crabcheck.app"
+publisher = "CrabCheck"

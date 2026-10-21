@@ -1,0 +1,9 @@
+[package]
+name = "crabcheck-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+rusqlite = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
