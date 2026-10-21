@@ -323,6 +323,17 @@ fn patch_dx_android_project(root: &Path, gen_android: &Path) -> Result<()> {
                 "dependencies {\n    implementation(files(\"libs/alarm-lib.aar\"))\n    implementation(\"net.java.dev.jna:jna:5.14.0@aar\")",
             );
         }
+        if !content.contains("com.google.mlkit:image-labeling") {
+            let mlkit_deps = concat!(
+                "dependencies {\n",
+                "    implementation(\"androidx.camera:camera-core:1.3.4\")\n",
+                "    implementation(\"androidx.camera:camera-camera2:1.3.4\")\n",
+                "    implementation(\"androidx.camera:camera-lifecycle:1.3.4\")\n",
+                "    implementation(\"androidx.camera:camera-view:1.3.4\")\n",
+                "    implementation(\"com.google.mlkit:image-labeling:17.0.8\")"
+            );
+            content = content.replace("dependencies {", mlkit_deps);
+        }
         fs::write(&gradle_kts, content)?;
     }
 
@@ -355,6 +366,10 @@ fn patch_dx_android_project(root: &Path, gen_android: &Path) -> Result<()> {
                 "android:theme=\"@style/AppTheme\" />",
                 "android:theme=\"@style/Theme.AppCompat.Light.NoActionBar\" />",
             );
+        }
+        if !manifest.contains("android.permission.CAMERA") {
+            let cam_perm = "    <uses-permission android:name=\"android.permission.CAMERA\" />\n    <application";
+            manifest = manifest.replace("    <application", cam_perm);
         }
         fs::write(&manifest_path, manifest)?;
     }

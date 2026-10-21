@@ -9,7 +9,7 @@ Base: [contexto.md](../contexto.md)
 | 1 | Plataforma | **Android-first**. Desktop/Web depois, só como cliente da timeline (sem alarmes intrusivos). |
 | 2 | Backend no MVP | **Local-first**, 100% offline, SQLite no aparelho, sem login. Backend entra com o Contrato Social. |
 | 3 | Fronteira Rust ↔ Android | **Híbrido**: o Kotlin trata todo o "momento do alarme" (AlarmManager, Receiver, Foreground Service, Activity de bloqueio, CameraX + ML Kit). O Rust/Dioxus trata a UI, os dados e o agendamento. |
-| 4 | Dono dos dados | O crate Rust `core` é o **único escritor** do SQLite (rusqlite) e fica exposto ao Kotlin via **UniFFI** (`ffi_upsert_alarm`, `ffi_get_alarm`, `ffi_list_alarms`, `ffi_delete_alarm`, `ffi_request_cooldown_unlock`, `ffi_reschedule_after_trigger`, `ffi_record_outcome`, `ffi_list_outcomes`). |
+| 4 | Dono dos dados | O crate Rust `core` é o **único escritor** do SQLite (rusqlite) e fica exposto ao Kotlin via **UniFFI** (`ffi_upsert_alarm`, `ffi_get_alarm`, `ffi_list_alarms`, `ffi_delete_alarm`, `ffi_request_cooldown_unlock`, `ffi_reschedule_after_trigger`, `ffi_record_outcome`, `ffi_record_outcome_with_proof`, `ffi_list_outcomes`, `ffi_curated_synonyms_for`, `ffi_matches_curated_label`). |
 | 5 | Rigidez do N3 | **Bloqueio duro**, com distribuição por APK (fora da Play Store). |
 | 6 | Mecanismo | **AccessibilityService** (devolve a Activity ao topo, fecha o painel de notificações e os recentes) + overlay `SYSTEM_ALERT_WINDOW`. Sem Device Owner. |
 | 7 | Saída de emergência | A chamada de emergência é sempre permitida. Existe uma **saída de pânico**, registada como FALHOU. |
@@ -67,13 +67,12 @@ stateDiagram-v2
 | 0 — Spike | Hello-world Dioxus Android + AAR injetado pelo `xtask` (`cargo run -p xtask -- spike-android`) + chamada UniFFI ida e volta + `setAlarmClock` a abrir uma Activity Kotlin com o ecrã bloqueado. (**Concluído**) |
 | 1 — Core & CRUD | `core` com schema sync-ready, recorrência, janela, cooldown de 24h, testes unitários, bindings UniFFI completos e UI Dioxus de CRUD de alarmes integrada ao `AlarmScheduler`. (**Concluído**) |
 | 2 — Alarmes | N1/N2/N3, Foreground Service, reagendamento após reboot ou mudança de fuso, AccessibilityService, pânico. |
-| 3 — Prova | CameraX + ML Kit, catálogo curado, limiar/N frames, gravação do frame. |
+| 3 — Prova | CameraX + ML Kit, catálogo curado, limiar/N frames, gravação do frame (`proof_image_path`, `matched_label`, `confidence`). (**Concluído**) |
 | 4 — UI | Timeline, CRUD de hábitos, notas, onboarding de permissões e ecrã de saúde. |
 | Fase 2 do produto | Supabase, conta, sync, Contrato Social; depois Desktop. |
 
 ## Em aberto (decidir na implementação)
 
-- Valores iniciais do limiar de confiança e de N frames (calibrar com testes reais por objeto).
-- Lista inicial do catálogo (validar cada label no modelo base antes de a incluir).
+- Calibração fina do limiar de confiança (inicialmente `0.70` em `5` frames consecutivos) e expansão do catálogo além de `Shoe`, `Book`, `Bottle`, `Cup` e `Laptop`.
 - Como o N1 é contabilizado nas estatísticas futuras (IGNORADO conta como falha?).
 - Tom da UI e idioma (pt-PT vs pt-BR, i18n).

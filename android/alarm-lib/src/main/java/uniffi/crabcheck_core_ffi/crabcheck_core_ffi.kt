@@ -727,6 +727,12 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -742,6 +748,8 @@ internal interface UniffiLib : Library {
         
     }
 
+    fun uniffi_crabcheck_core_ffi_fn_func_ffi_curated_synonyms_for(`targetLabel`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_crabcheck_core_ffi_fn_func_ffi_delete_alarm(`dbPath`: RustBuffer.ByValue,`alarmId`: RustBuffer.ByValue,`nowEpochMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_crabcheck_core_ffi_fn_func_ffi_get_alarm(`dbPath`: RustBuffer.ByValue,`alarmId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -750,7 +758,11 @@ internal interface UniffiLib : Library {
     ): RustBuffer.ByValue
     fun uniffi_crabcheck_core_ffi_fn_func_ffi_list_outcomes(`dbPath`: RustBuffer.ByValue,`alarmId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_crabcheck_core_ffi_fn_func_ffi_matches_curated_label(`targetLabel`: RustBuffer.ByValue,`detectedLabel`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
     fun uniffi_crabcheck_core_ffi_fn_func_ffi_record_outcome(`dbPath`: RustBuffer.ByValue,`alarmId`: RustBuffer.ByValue,`outcome`: RustBuffer.ByValue,`recordedAtEpochMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    fun uniffi_crabcheck_core_ffi_fn_func_ffi_record_outcome_with_proof(`dbPath`: RustBuffer.ByValue,`alarmId`: RustBuffer.ByValue,`outcome`: RustBuffer.ByValue,`recordedAtEpochMs`: Long,`proofImagePath`: RustBuffer.ByValue,`matchedLabel`: RustBuffer.ByValue,`confidence`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_crabcheck_core_ffi_fn_func_ffi_request_cooldown_unlock(`dbPath`: RustBuffer.ByValue,`alarmId`: RustBuffer.ByValue,`nowEpochMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
@@ -870,6 +882,8 @@ internal interface UniffiLib : Library {
     ): Unit
     fun ffi_crabcheck_core_ffi_rust_future_complete_void(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    fun uniffi_crabcheck_core_ffi_checksum_func_ffi_curated_synonyms_for(
+    ): Short
     fun uniffi_crabcheck_core_ffi_checksum_func_ffi_delete_alarm(
     ): Short
     fun uniffi_crabcheck_core_ffi_checksum_func_ffi_get_alarm(
@@ -878,7 +892,11 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_crabcheck_core_ffi_checksum_func_ffi_list_outcomes(
     ): Short
+    fun uniffi_crabcheck_core_ffi_checksum_func_ffi_matches_curated_label(
+    ): Short
     fun uniffi_crabcheck_core_ffi_checksum_func_ffi_record_outcome(
+    ): Short
+    fun uniffi_crabcheck_core_ffi_checksum_func_ffi_record_outcome_with_proof(
     ): Short
     fun uniffi_crabcheck_core_ffi_checksum_func_ffi_request_cooldown_unlock(
     ): Short
@@ -903,6 +921,9 @@ private fun uniffiCheckContractApiVersion(lib: UniffiLib) {
 
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: UniffiLib) {
+    if (lib.uniffi_crabcheck_core_ffi_checksum_func_ffi_curated_synonyms_for() != 17171.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_crabcheck_core_ffi_checksum_func_ffi_delete_alarm() != 38070.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -915,7 +936,13 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_crabcheck_core_ffi_checksum_func_ffi_list_outcomes() != 58234.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_crabcheck_core_ffi_checksum_func_ffi_matches_curated_label() != 24279.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_crabcheck_core_ffi_checksum_func_ffi_record_outcome() != 26654.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_crabcheck_core_ffi_checksum_func_ffi_record_outcome_with_proof() != 53631.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_crabcheck_core_ffi_checksum_func_ffi_request_cooldown_unlock() != 52468.toShort()) {
@@ -1063,6 +1090,29 @@ public object FfiConverterLong: FfiConverter<Long, Long> {
 
     override fun write(value: Long, buf: ByteBuffer) {
         buf.putLong(value)
+    }
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterFloat: FfiConverter<Float, Float> {
+    override fun lift(value: Float): Float {
+        return value
+    }
+
+    override fun read(buf: ByteBuffer): Float {
+        return buf.getFloat()
+    }
+
+    override fun lower(value: Float): Float {
+        return value
+    }
+
+    override fun allocationSize(value: Float) = 4UL
+
+    override fun write(value: Float, buf: ByteBuffer) {
+        buf.putFloat(value)
     }
 }
 
@@ -1232,7 +1282,10 @@ data class FfiOutcomeDto (
     var `id`: kotlin.Long, 
     var `alarmId`: kotlin.String, 
     var `outcome`: kotlin.String, 
-    var `recordedAtEpochMs`: kotlin.Long
+    var `recordedAtEpochMs`: kotlin.Long, 
+    var `proofImagePath`: kotlin.String?, 
+    var `matchedLabel`: kotlin.String?, 
+    var `confidence`: kotlin.Float?
 ) {
     
     companion object
@@ -1248,6 +1301,9 @@ public object FfiConverterTypeFfiOutcomeDto: FfiConverterRustBuffer<FfiOutcomeDt
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
             FfiConverterLong.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalFloat.read(buf),
         )
     }
 
@@ -1255,7 +1311,10 @@ public object FfiConverterTypeFfiOutcomeDto: FfiConverterRustBuffer<FfiOutcomeDt
             FfiConverterLong.allocationSize(value.`id`) +
             FfiConverterString.allocationSize(value.`alarmId`) +
             FfiConverterString.allocationSize(value.`outcome`) +
-            FfiConverterLong.allocationSize(value.`recordedAtEpochMs`)
+            FfiConverterLong.allocationSize(value.`recordedAtEpochMs`) +
+            FfiConverterOptionalString.allocationSize(value.`proofImagePath`) +
+            FfiConverterOptionalString.allocationSize(value.`matchedLabel`) +
+            FfiConverterOptionalFloat.allocationSize(value.`confidence`)
     )
 
     override fun write(value: FfiOutcomeDto, buf: ByteBuffer) {
@@ -1263,6 +1322,9 @@ public object FfiConverterTypeFfiOutcomeDto: FfiConverterRustBuffer<FfiOutcomeDt
             FfiConverterString.write(value.`alarmId`, buf)
             FfiConverterString.write(value.`outcome`, buf)
             FfiConverterLong.write(value.`recordedAtEpochMs`, buf)
+            FfiConverterOptionalString.write(value.`proofImagePath`, buf)
+            FfiConverterOptionalString.write(value.`matchedLabel`, buf)
+            FfiConverterOptionalFloat.write(value.`confidence`, buf)
     }
 }
 
@@ -1363,6 +1425,98 @@ public object FfiConverterOptionalLong: FfiConverterRustBuffer<kotlin.Long?> {
 /**
  * @suppress
  */
+public object FfiConverterOptionalFloat: FfiConverterRustBuffer<kotlin.Float?> {
+    override fun read(buf: ByteBuffer): kotlin.Float? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterFloat.read(buf)
+    }
+
+    override fun allocationSize(value: kotlin.Float?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterFloat.allocationSize(value)
+        }
+    }
+
+    override fun write(value: kotlin.Float?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterFloat.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?> {
+    override fun read(buf: ByteBuffer): kotlin.String? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterString.read(buf)
+    }
+
+    override fun allocationSize(value: kotlin.String?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterString.allocationSize(value)
+        }
+    }
+
+    override fun write(value: kotlin.String?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterString.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceString: FfiConverterRustBuffer<List<kotlin.String>> {
+    override fun read(buf: ByteBuffer): List<kotlin.String> {
+        val len = buf.getInt()
+        return List<kotlin.String>(len) {
+            FfiConverterString.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<kotlin.String>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterString.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<kotlin.String>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterString.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeFfiAlarmDto: FfiConverterRustBuffer<List<FfiAlarmDto>> {
     override fun read(buf: ByteBuffer): List<FfiAlarmDto> {
         val len = buf.getInt()
@@ -1411,7 +1565,16 @@ public object FfiConverterSequenceTypeFfiOutcomeDto: FfiConverterRustBuffer<List
             FfiConverterTypeFfiOutcomeDto.write(it, buf)
         }
     }
+} fun `ffiCuratedSynonymsFor`(`targetLabel`: kotlin.String): List<kotlin.String> {
+            return FfiConverterSequenceString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_crabcheck_core_ffi_fn_func_ffi_curated_synonyms_for(
+        FfiConverterString.lower(`targetLabel`),_status)
 }
+    )
+    }
+    
+
     @Throws(FfiException::class) fun `ffiDeleteAlarm`(`dbPath`: kotlin.String, `alarmId`: kotlin.String, `nowEpochMs`: kotlin.Long)
         = 
     uniffiRustCallWithError(FfiException) { _status ->
@@ -1450,12 +1613,30 @@ public object FfiConverterSequenceTypeFfiOutcomeDto: FfiConverterRustBuffer<List
     )
     }
     
+ fun `ffiMatchesCuratedLabel`(`targetLabel`: kotlin.String, `detectedLabel`: kotlin.String): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_crabcheck_core_ffi_fn_func_ffi_matches_curated_label(
+        FfiConverterString.lower(`targetLabel`),FfiConverterString.lower(`detectedLabel`),_status)
+}
+    )
+    }
+    
 
     @Throws(FfiException::class) fun `ffiRecordOutcome`(`dbPath`: kotlin.String, `alarmId`: kotlin.String, `outcome`: kotlin.String, `recordedAtEpochMs`: kotlin.Long)
         = 
     uniffiRustCallWithError(FfiException) { _status ->
     UniffiLib.INSTANCE.uniffi_crabcheck_core_ffi_fn_func_ffi_record_outcome(
         FfiConverterString.lower(`dbPath`),FfiConverterString.lower(`alarmId`),FfiConverterString.lower(`outcome`),FfiConverterLong.lower(`recordedAtEpochMs`),_status)
+}
+    
+    
+
+    @Throws(FfiException::class) fun `ffiRecordOutcomeWithProof`(`dbPath`: kotlin.String, `alarmId`: kotlin.String, `outcome`: kotlin.String, `recordedAtEpochMs`: kotlin.Long, `proofImagePath`: kotlin.String?, `matchedLabel`: kotlin.String?, `confidence`: kotlin.Float?)
+        = 
+    uniffiRustCallWithError(FfiException) { _status ->
+    UniffiLib.INSTANCE.uniffi_crabcheck_core_ffi_fn_func_ffi_record_outcome_with_proof(
+        FfiConverterString.lower(`dbPath`),FfiConverterString.lower(`alarmId`),FfiConverterString.lower(`outcome`),FfiConverterLong.lower(`recordedAtEpochMs`),FfiConverterOptionalString.lower(`proofImagePath`),FfiConverterOptionalString.lower(`matchedLabel`),FfiConverterOptionalFloat.lower(`confidence`),_status)
 }
     
     

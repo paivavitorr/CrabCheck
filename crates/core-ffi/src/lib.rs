@@ -1,4 +1,4 @@
-use crabcheck_core::{AlarmLevel, AlarmSpec, CoreStore};
+use crabcheck_core::{curated_synonyms_for, matches_curated_label, AlarmLevel, AlarmSpec, CoreStore};
 use thiserror::Error;
 
 uniffi::setup_scaffolding!();
@@ -78,12 +78,25 @@ impl From<FfiAlarmDto> for AlarmSpec {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct FfiOutcomeDto {
     pub id: i64,
     pub alarm_id: String,
     pub outcome: String,
     pub recorded_at_epoch_ms: i64,
+    pub proof_image_path: Option<String>,
+    pub matched_label: Option<String>,
+    pub confidence: Option<f32>,
+}
+
+#[uniffi::export]
+pub fn ffi_curated_synonyms_for(target_label: String) -> Vec<String> {
+    curated_synonyms_for(&target_label)
+}
+
+#[uniffi::export]
+pub fn ffi_matches_curated_label(target_label: String, detected_label: String) -> bool {
+    matches_curated_label(&target_label, &detected_label)
 }
 
 #[uniffi::export]
@@ -154,6 +167,28 @@ pub fn ffi_record_outcome(
 }
 
 #[uniffi::export]
+pub fn ffi_record_outcome_with_proof(
+    db_path: String,
+    alarm_id: String,
+    outcome: String,
+    recorded_at_epoch_ms: i64,
+    proof_image_path: Option<String>,
+    matched_label: Option<String>,
+    confidence: Option<f32>,
+) -> Result<(), FfiError> {
+    let store = CoreStore::open(&db_path)?;
+    store.record_outcome_with_proof(
+        &alarm_id,
+        &outcome,
+        recorded_at_epoch_ms,
+        proof_image_path.as_deref(),
+        matched_label.as_deref(),
+        confidence,
+    )?;
+    Ok(())
+}
+
+#[uniffi::export]
 pub fn ffi_list_outcomes(
     db_path: String,
     alarm_id: String,
@@ -167,6 +202,9 @@ pub fn ffi_list_outcomes(
             alarm_id: r.alarm_id,
             outcome: r.outcome,
             recorded_at_epoch_ms: r.recorded_at_epoch_ms,
+            proof_image_path: r.proof_image_path,
+            matched_label: r.matched_label,
+            confidence: r.confidence,
         })
         .collect())
 }

@@ -5,6 +5,8 @@ use thiserror::Error;
 use uuid::Uuid;
 
 pub const COOLDOWN_DURATION_MS: i64 = 86_400_000;
+pub const DEFAULT_CONFIDENCE_THRESHOLD: f32 = 0.70;
+pub const REQUIRED_CONSECUTIVE_FRAMES: u8 = 5;
 
 pub const CURATED_OBJECT_LABELS: &[(&str, &str)] = &[
     ("Shoe", "Ténis / Calçado"),
@@ -13,6 +15,49 @@ pub const CURATED_OBJECT_LABELS: &[(&str, &str)] = &[
     ("Cup", "Caneca / Copo"),
     ("Laptop", "Computador Portátil"),
 ];
+
+pub fn curated_synonyms_for(target_label: &str) -> Vec<String> {
+    let norm = target_label.trim().to_ascii_lowercase();
+    let synonyms: &[&str] = match norm.as_str() {
+        "shoe" => &[
+            "shoe",
+            "footwear",
+            "sneakers",
+            "boot",
+            "sandal",
+            "sports equipment",
+        ],
+        "book" => &["book", "publication", "paper", "notebook", "novel"],
+        "bottle" => &[
+            "bottle",
+            "water bottle",
+            "drinkware",
+            "plastic bottle",
+            "glass bottle",
+        ],
+        "cup" => &["cup", "mug", "coffee cup", "tableware", "drinkware", "teacup"],
+        "laptop" => &[
+            "laptop",
+            "computer",
+            "personal computer",
+            "netbook",
+            "computer keyboard",
+            "display device",
+        ],
+        _ => return if norm.is_empty() { Vec::new() } else { vec![norm] },
+    };
+    synonyms.iter().map(|s| (*s).to_string()).collect()
+}
+
+pub fn matches_curated_label(target_label: &str, detected_label: &str) -> bool {
+    let detected = detected_label.trim().to_ascii_lowercase();
+    if detected.is_empty() {
+        return false;
+    }
+    curated_synonyms_for(target_label)
+        .iter()
+        .any(|syn| syn == &detected)
+}
 
 #[derive(Error, Debug)]
 pub enum CoreError {
@@ -246,12 +291,15 @@ pub fn compute_next_trigger_ms(
     ))
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AlarmOutcomeRecord {
     pub id: i64,
     pub alarm_id: String,
     pub outcome: String,
     pub recorded_at_epoch_ms: i64,
+    pub proof_image_path: Option<String>,
+    pub matched_label: Option<String>,
+    pub confidence: Option<f32>,
 }
 
 pub struct CoreStore {
@@ -296,7 +344,10 @@ impl CoreStore {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 alarm_id TEXT NOT NULL,
                 outcome TEXT NOT NULL,
-                recorded_at_epoch_ms INTEGER NOT NULL
+                recorded_at_epoch_ms INTEGER NOT NULL,
+                proof_image_path TEXT,
+                matched_label TEXT,
+                confidence REAL
             );",
         )?;
 
@@ -349,6 +400,32 @@ impl CoreStore {
 
         for (col_name, sql) in alter_statements {
             if !cols.iter().any(|c| c == col_name) {
+                self.conn.execute(sql, [])?;
+            }
+        }
+
+        let mut out_stmt = self.conn.prepare("PRAGMA table_info(alarm_outcomes)")?;
+        let out_cols: Vec<String> = out_stmt
+            .query_map([], |row| row.get::<_, String>(1))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        let out_alters = [
+            (
+                "proof_image_path",
+                "ALTER TABLE alarm_outcomes ADD COLUMN proof_image_path TEXT",
+            ),
+            (
+                "matched_label",
+                "ALTER TABLE alarm_outcomes ADD COLUMN matched_label TEXT",
+            ),
+            (
+                "confidence",
+                "ALTER TABLE alarm_outcomes ADD COLUMN confidence REAL",
+            ),
+        ];
+
+        for (col_name, sql) in out_alters {
+            if !out_cols.iter().any(|c| c == col_name) {
                 self.conn.execute(sql, [])?;
             }
         }
@@ -630,32 +707,68 @@ impl CoreStore {
         outcome: &str,
         recorded_at_epoch_ms: i64,
     ) -> Result<()> {
+        self.record_outcome_with_proof(alarm_id, outcome, recorded_at_epoch_ms, None, None, None)
+    }
+
+    pub fn record_outcome_with_proof(
+        &self,
+        alarm_id: &str,
+        outcome: &str,
+        recorded_at_epoch_ms: i64,
+        proof_image_path: Option<&str>,
+        matched_label: Option<&str>,
+        confidence: Option<f32>,
+    ) -> Result<()> {
         match outcome {
             "CUMPRIDO" | "FALHOU" | "IGNORADO" | "ADIADO" => {}
             other => return Err(CoreError::InvalidOutcome(other.to_string())),
         }
 
+        if let Some(conf) = confidence {
+            if !conf.is_finite() || !(0.0..=1.0).contains(&conf) {
+                return Err(CoreError::Validation(format!(
+                    "Confiança inválida: {conf} (esperado 0.0..=1.0)"
+                )));
+            }
+        }
+
         self.conn.execute(
-            "INSERT INTO alarm_outcomes (alarm_id, outcome, recorded_at_epoch_ms)
-             VALUES (?1, ?2, ?3)",
-            params![alarm_id, outcome, recorded_at_epoch_ms],
+            "INSERT INTO alarm_outcomes (
+                alarm_id, outcome, recorded_at_epoch_ms,
+                proof_image_path, matched_label, confidence
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                alarm_id,
+                outcome,
+                recorded_at_epoch_ms,
+                proof_image_path,
+                matched_label,
+                confidence.map(f64::from)
+            ],
         )?;
         Ok(())
     }
 
     pub fn list_outcomes(&self, alarm_id: &str) -> Result<Vec<AlarmOutcomeRecord>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, alarm_id, outcome, recorded_at_epoch_ms
+            "SELECT
+                id, alarm_id, outcome, recorded_at_epoch_ms,
+                proof_image_path, matched_label, confidence
              FROM alarm_outcomes
              WHERE alarm_id = ?1
              ORDER BY id ASC",
         )?;
         let rows = stmt.query_map(params![alarm_id], |row| {
+            let conf_f64: Option<f64> = row.get(6)?;
             Ok(AlarmOutcomeRecord {
                 id: row.get(0)?,
                 alarm_id: row.get(1)?,
                 outcome: row.get(2)?,
                 recorded_at_epoch_ms: row.get(3)?,
+                proof_image_path: row.get(4)?,
+                matched_label: row.get(5)?,
+                confidence: conf_f64.map(|v| v as f32),
             })
         })?;
 
@@ -813,6 +926,54 @@ mod tests {
         store.set_alarm_enabled("rec-01", false, now + 1_000)?;
         let disabled_next = store.reschedule_after_trigger("rec-01", now + 2_000)?;
         assert_eq!(disabled_next, None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn curated_synonyms_and_proof_outcomes() -> Result<()> {
+        assert!(matches_curated_label("Shoe", "Footwear"));
+        assert!(matches_curated_label("Shoe", "sneakers"));
+        assert!(matches_curated_label("Book", "Publication"));
+        assert!(matches_curated_label("Bottle", "Water bottle"));
+        assert!(matches_curated_label("Cup", "Mug"));
+        assert!(matches_curated_label("Laptop", "Personal computer"));
+        assert!(!matches_curated_label("Shoe", "Mug"));
+        assert!(!matches_curated_label("Book", ""));
+
+        let store = CoreStore::open_in_memory()?;
+        store.record_outcome_with_proof(
+            "alarm-proof-1",
+            "CUMPRIDO",
+            1_700_000_010_000,
+            Some("/data/user/0/com.crabcheck.app/files/proofs/proof_1.jpg"),
+            Some("Sneakers"),
+            Some(0.88),
+        )?;
+
+        let outcomes = store.list_outcomes("alarm-proof-1")?;
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(
+            outcomes[0].proof_image_path.as_deref(),
+            Some("/data/user/0/com.crabcheck.app/files/proofs/proof_1.jpg")
+        );
+        assert_eq!(outcomes[0].matched_label.as_deref(), Some("Sneakers"));
+        assert!(outcomes[0]
+            .confidence
+            .is_some_and(|c| (c - 0.88).abs() < 0.001));
+
+        // Reject out-of-range or NaN confidence
+        assert!(matches!(
+            store.record_outcome_with_proof(
+                "alarm-proof-1",
+                "CUMPRIDO",
+                1_700_000_020_000,
+                None,
+                Some("Shoe"),
+                Some(1.5),
+            ),
+            Err(CoreError::Validation(_))
+        ));
 
         Ok(())
     }

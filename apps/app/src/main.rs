@@ -501,8 +501,23 @@ fn App() -> Element {
                         for out in outcomes() {
                             li {
                                 key: "{out.id}",
-                                style: "font-size: 13px; margin-bottom: 4px;",
-                                "#{out.id} [{out.outcome}] @ {out.recorded_at_epoch_ms}"
+                                style: "font-size: 13px; margin-bottom: 6px;",
+                                div {
+                                    "#{out.id} [{out.outcome}] @ {out.recorded_at_epoch_ms}"
+                                    if let Some(lbl) = &out.matched_label {
+                                        if let Some(conf) = out.confidence {
+                                            " — ML Kit: {lbl} ({conf * 100.0:.0}%)"
+                                        } else {
+                                            " — ML Kit: {lbl}"
+                                        }
+                                    }
+                                }
+                                if let Some(path) = &out.proof_image_path {
+                                    div {
+                                        style: "font-size: 11px; color: #047857;",
+                                        "📷 Prova gravada: {path}"
+                                    }
+                                }
                             }
                         }
                     }

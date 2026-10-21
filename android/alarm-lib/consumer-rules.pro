@@ -2,4 +2,6 @@
 -keep class * implements com.sun.jna.** { *; }
 -keep class uniffi.** { *; }
 -keep class com.crabcheck.alarmlib.** { *; }
+-keep class com.google.mlkit.** { *; }
+-dontwarn com.google.mlkit.**
 -dontwarn java.awt.**
