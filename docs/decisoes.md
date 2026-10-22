@@ -66,7 +66,7 @@ stateDiagram-v2
 |------|------------|
 | 0 — Spike | Hello-world Dioxus Android + AAR injetado pelo `xtask` (`cargo run -p xtask -- spike-android`) + chamada UniFFI ida e volta + `setAlarmClock` a abrir uma Activity Kotlin com o ecrã bloqueado. (**Concluído**) |
 | 1 — Core & CRUD | `core` com schema sync-ready, recorrência, janela, cooldown de 24h, testes unitários, bindings UniFFI completos e UI Dioxus de CRUD de alarmes integrada ao `AlarmScheduler`. (**Concluído**) |
-| 2 — Alarmes | N1/N2/N3, Foreground Service, reagendamento após reboot ou mudança de fuso, AccessibilityService, pânico. |
+| 2 — Alarmes | N1/N2/N3, Foreground Service, reagendamento após reboot ou mudança de fuso, AccessibilityService, pânico. (**Concluído**) |
 | 3 — Prova | CameraX + ML Kit, catálogo curado, limiar/N frames, gravação do frame (`proof_image_path`, `matched_label`, `confidence`). (**Concluído**) |
 | 4 — UI | Timeline, CRUD de hábitos, notas, onboarding de permissões e ecrã de saúde. |
 | Fase 2 do produto | Supabase, conta, sync, Contrato Social; depois Desktop. |

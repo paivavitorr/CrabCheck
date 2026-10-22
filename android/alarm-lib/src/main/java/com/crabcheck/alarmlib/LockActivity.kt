@@ -10,13 +10,18 @@ import android.graphics.Bitmap
 import android.graphics.Matrix
 import android.os.Build
 import android.os.Bundle
+import android.os.CountDownTimer
+import android.text.Editable
+import android.text.TextWatcher
 import android.util.Size
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
@@ -51,12 +56,16 @@ class LockActivity : AppCompatActivity() {
         private const val REQUIRED_FRAMES = 5
         private const val CONFIDENCE_THRESHOLD = 0.70f
         private const val SNOOZE_DURATION_MS = 5L * 60L * 1000L
+        private const val PANIC_COUNTDOWN_MS = 3L * 60L * 1000L
+        private const val COMMITMENT_PHRASE = "ESTOU DESISTINDO DO MEU COMPROMISSO"
     }
 
     private var cameraExecutor: ExecutorService? = null
     private var cameraProvider: ProcessCameraProvider? = null
     private var imageLabeler: ImageLabeler? = null
     private val hasCompletedProof = AtomicBoolean(false)
+    private var panicDialog: AlertDialog? = null
+    private var panicTimer: CountDownTimer? = null
 
     private var currentDbPath: String = ""
     private var currentAlarmId: String = "spike-001"
@@ -75,16 +84,49 @@ class LockActivity : AppCompatActivity() {
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
         if (intent != null) {
-            setIntent(intent)
-            renderAlarmFromIntent(intent)
+            val incomingAlarmId = intent.getStringExtra(AlarmScheduler.EXTRA_ALARM_ID)
+            if (incomingAlarmId != null && incomingAlarmId != currentAlarmId) {
+                setIntent(intent)
+                renderAlarmFromIntent(intent)
+            }
         }
     }
 
     override fun onDestroy() {
+        if (isChangingConfigurations) {
+            dismissPanicDialog()
+            stopCameraSession()
+            cameraExecutor?.shutdown()
+            cameraExecutor = null
+            super.onDestroy()
+            return
+        }
+
+        dismissPanicDialog()
         stopCameraSession()
+        stopAlarmAudioService()
+        AlarmStateManager.onAlarmDismissed(currentAlarmId)
         cameraExecutor?.shutdown()
         cameraExecutor = null
         super.onDestroy()
+    }
+
+    private fun stopAlarmAudioService() {
+        try {
+            stopService(Intent(this, AlarmAudioService::class.java))
+        } catch (_: Throwable) {
+        }
+    }
+
+    private fun dismissPanicDialog() {
+        try {
+            panicTimer?.cancel()
+            panicTimer = null
+            panicDialog?.dismiss()
+            panicDialog = null
+            AlarmStateManager.setPanicActive(false)
+        } catch (_: Throwable) {
+        }
     }
 
     private fun stopCameraSession() {
@@ -209,7 +251,7 @@ class LockActivity : AppCompatActivity() {
         val panicBtn = Button(this).apply {
             text = "Saída de Pânico (FALHOU)"
             setOnClickListener {
-                recordAndClose(dbPath, alarmId, "FALHOU")
+                showStructuredPanicDialog(dbPath, alarmId)
             }
         }
         root.addView(panicBtn)
@@ -241,7 +283,7 @@ class LockActivity : AppCompatActivity() {
             val panicBtn = Button(this).apply {
                 text = "Saída de Pânico (FALHOU)"
                 setOnClickListener {
-                    recordAndClose(dbPath, alarmId, "FALHOU")
+                    showStructuredPanicDialog(dbPath, alarmId)
                 }
             }
             root.addView(panicBtn)
@@ -483,6 +525,92 @@ class LockActivity : AppCompatActivity() {
         }
     }
 
+    private fun showStructuredPanicDialog(dbPath: String, alarmId: String) {
+        dismissPanicDialog()
+        AlarmStateManager.setPanicActive(true)
+
+        val dialogLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 32, 48, 32)
+        }
+
+        val timerView = TextView(this).apply {
+            textSize = 18f
+            gravity = Gravity.CENTER
+            text = "Aguarde: 03:00"
+            setPadding(0, 0, 0, 16)
+        }
+        dialogLayout.addView(timerView)
+
+        val instructionView = TextView(this).apply {
+            textSize = 14f
+            text = "Para confirmar a saída de pânico, digite exatamente a frase abaixo após o término do cronômetro:\n\n\"$COMMITMENT_PHRASE\""
+            setPadding(0, 0, 0, 16)
+        }
+        dialogLayout.addView(instructionView)
+
+        val inputField = EditText(this).apply {
+            hint = "Digite a frase aqui..."
+            isEnabled = false
+            textSize = 14f
+        }
+        dialogLayout.addView(inputField)
+
+        val confirmBtn = Button(this).apply {
+            text = "Confirmar Saída de Pânico (FALHOU)"
+            isEnabled = false
+        }
+        dialogLayout.addView(confirmBtn)
+
+        val cancelBtn = Button(this).apply {
+            text = "Voltar e Cumprir Alarme"
+            setOnClickListener {
+                dismissPanicDialog()
+            }
+        }
+        dialogLayout.addView(cancelBtn)
+
+        inputField.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                val matches = s?.toString()?.trim() == COMMITMENT_PHRASE
+                confirmBtn.isEnabled = matches && (inputField.isEnabled)
+            }
+            override fun afterTextChanged(s: Editable?) {}
+        })
+
+        confirmBtn.setOnClickListener {
+            dismissPanicDialog()
+            recordAndClose(dbPath, alarmId, "FALHOU")
+        }
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Mecânica de Pânico (Penalidade)")
+            .setView(dialogLayout)
+            .setCancelable(false)
+            .create()
+
+        panicDialog = dialog
+        dialog.show()
+
+        panicTimer = object : CountDownTimer(PANIC_COUNTDOWN_MS, 1000L) {
+            override fun onTick(millisUntilFinished: Long) {
+                val totalSeconds = millisUntilFinished / 1000L
+                val mins = totalSeconds / 60
+                val secs = totalSeconds % 60
+                timerView.text = String.format(Locale.US, "Aguarde: %02d:%02d", mins, secs)
+            }
+
+            override fun onFinish() {
+                timerView.text = "Tempo concluído! Digite a frase para liberar a confirmação."
+                inputField.isEnabled = true
+                if (inputField.text.toString().trim() == COMMITMENT_PHRASE) {
+                    confirmBtn.isEnabled = true
+                }
+            }
+        }.start()
+    }
+
     private fun recordProofAndClose(
         dbPath: String,
         alarmId: String,
@@ -491,7 +619,10 @@ class LockActivity : AppCompatActivity() {
         matchedLabel: String,
         confidence: Float
     ) {
+        dismissPanicDialog()
         stopCameraSession()
+        stopAlarmAudioService()
+        AlarmStateManager.onAlarmDismissed(alarmId)
         try {
             ffiRecordOutcomeWithProof(
                 dbPath,
@@ -512,7 +643,10 @@ class LockActivity : AppCompatActivity() {
     }
 
     private fun snoozeAndClose(dbPath: String, alarmId: String) {
+        dismissPanicDialog()
         stopCameraSession()
+        stopAlarmAudioService()
+        AlarmStateManager.onAlarmDismissed(alarmId)
         val now = System.currentTimeMillis()
         try {
             ffiRecordOutcome(dbPath, alarmId, "ADIADO", now)
@@ -523,7 +657,10 @@ class LockActivity : AppCompatActivity() {
     }
 
     private fun recordAndClose(dbPath: String, alarmId: String, outcome: String) {
+        dismissPanicDialog()
         stopCameraSession()
+        stopAlarmAudioService()
+        AlarmStateManager.onAlarmDismissed(alarmId)
         val now = System.currentTimeMillis()
         try {
             ffiRecordOutcome(dbPath, alarmId, outcome, now)

@@ -138,4 +138,29 @@ class FfiRoundtripTest {
         assertEquals(0.91f, validated.confidence, 1e-4f)
         assertEquals(5, validated.consecutiveHits)
     }
+
+    @Test
+    fun alarmStateManagerTracking() {
+        assertFalse(AlarmStateManager.isN3AlarmActive())
+        assertNull(AlarmStateManager.getActiveAlarmId())
+        assertEquals(0, AlarmStateManager.getActiveAlarmLevel())
+
+        AlarmStateManager.onAlarmTriggered("alarm-n2", 2)
+        assertEquals("alarm-n2", AlarmStateManager.getActiveAlarmId())
+        assertEquals(2, AlarmStateManager.getActiveAlarmLevel())
+        assertFalse(AlarmStateManager.isN3AlarmActive())
+
+        AlarmStateManager.onAlarmTriggered("alarm-n3", 3)
+        assertEquals("alarm-n3", AlarmStateManager.getActiveAlarmId())
+        assertEquals(3, AlarmStateManager.getActiveAlarmLevel())
+        assertTrue(AlarmStateManager.isN3AlarmActive())
+
+        AlarmStateManager.setPanicActive(true)
+        assertTrue(AlarmStateManager.isPanicActive())
+
+        AlarmStateManager.onAlarmDismissed("alarm-n3")
+        assertFalse(AlarmStateManager.isN3AlarmActive())
+        assertNull(AlarmStateManager.getActiveAlarmId())
+        assertFalse(AlarmStateManager.isPanicActive())
+    }
 }

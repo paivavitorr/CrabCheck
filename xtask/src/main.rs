@@ -352,12 +352,38 @@ fn patch_dx_android_project(root: &Path, gen_android: &Path) -> Result<()> {
             let components = r#"        <receiver
             android:name="com.crabcheck.alarmlib.AlarmReceiver"
             android:exported="false" />
+        <receiver
+            android:name="com.crabcheck.alarmlib.BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+            </intent-filter>
+        </receiver>
+        <service
+            android:name="com.crabcheck.alarmlib.AlarmAudioService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+        <service
+            android:name="com.crabcheck.alarmlib.AlarmAccessibilityService"
+            android:exported="false"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
         <activity
             android:name="com.crabcheck.alarmlib.LockActivity"
             android:exported="false"
             android:showOnLockScreen="true"
             android:turnScreenOn="true"
             android:launchMode="singleInstance"
+            android:screenOrientation="portrait"
             android:theme="@style/Theme.AppCompat.Light.NoActionBar" />
     </application>"#;
             manifest = manifest.replace("    </application>", components);
@@ -366,10 +392,49 @@ fn patch_dx_android_project(root: &Path, gen_android: &Path) -> Result<()> {
                 "android:theme=\"@style/AppTheme\" />",
                 "android:theme=\"@style/Theme.AppCompat.Light.NoActionBar\" />",
             );
+            if !manifest.contains("com.crabcheck.alarmlib.AlarmAudioService") {
+                let extra_components = r#"        <receiver
+            android:name="com.crabcheck.alarmlib.BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+            </intent-filter>
+        </receiver>
+        <service
+            android:name="com.crabcheck.alarmlib.AlarmAudioService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+        <service
+            android:name="com.crabcheck.alarmlib.AlarmAccessibilityService"
+            android:exported="false"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+    </application>"#;
+                manifest = manifest.replace("    </application>", extra_components);
+            }
         }
         if !manifest.contains("android.permission.CAMERA") {
             let cam_perm = "    <uses-permission android:name=\"android.permission.CAMERA\" />\n    <application";
             manifest = manifest.replace("    <application", cam_perm);
+        }
+        if !manifest.contains("android.permission.RECEIVE_BOOT_COMPLETED") {
+            let boot_perms = concat!(
+                "    <uses-permission android:name=\"android.permission.RECEIVE_BOOT_COMPLETED\" />\n",
+                "    <uses-permission android:name=\"android.permission.FOREGROUND_SERVICE\" />\n",
+                "    <uses-permission android:name=\"android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK\" />\n",
+                "    <uses-permission android:name=\"android.permission.VIBRATE\" />\n",
+                "    <application"
+            );
+            manifest = manifest.replace("    <application", boot_perms);
         }
         fs::write(&manifest_path, manifest)?;
     }
