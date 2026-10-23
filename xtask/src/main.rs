@@ -37,10 +37,15 @@ fn try_main() -> Result<()> {
         "spike-android" => {
             run_bindgen(&root)?;
             build_aar(&root)?;
-            build_and_patch_dioxus_android(&root)
+            build_and_patch_dioxus_android(&root, false)
+        }
+        "release-apk" => {
+            run_bindgen(&root)?;
+            build_aar(&root)?;
+            build_and_patch_dioxus_android(&root, true)
         }
         _ => {
-            println!("Usage: cargo run -p xtask -- <bindgen|build-aar|spike-android>");
+            println!("Usage: cargo run -p xtask -- <bindgen|build-aar|spike-android|release-apk>");
             Ok(())
         }
     }
@@ -221,8 +226,9 @@ fn build_aar(root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn build_and_patch_dioxus_android(root: &Path) -> Result<()> {
-    println!("==> [3/4] Running dx build --platform android for apps/app...");
+fn build_and_patch_dioxus_android(root: &Path, is_release: bool) -> Result<()> {
+    let mode_str = if is_release { "release" } else { "debug" };
+    println!("==> [3/4] Running dx build ({mode_str}) --platform android for apps/app...");
     let sdk = find_android_sdk()?;
     let ndk = find_ndk(&sdk)?;
     let jdk = find_jdk17()?;
@@ -237,20 +243,26 @@ fn build_and_patch_dioxus_android(root: &Path) -> Result<()> {
     );
 
     for arch in ["arm64", "x64"] {
-        let dx_status = Command::new("dx")
-            .current_dir(&app_dir)
+        let mut cmd = Command::new("dx");
+        cmd.current_dir(&app_dir)
             .env("ANDROID_HOME", &sdk)
             .env("ANDROID_SDK_ROOT", &sdk)
             .env("ANDROID_NDK_HOME", &ndk)
             .env("NDK_HOME", &ndk)
             .env("JAVA_HOME", &jdk)
-            .env("PATH", &new_path)
-            .args(["build", "--platform", "android", "--arch", arch])
-            .status()?;
+            .env("PATH", &new_path);
+
+        if is_release {
+            cmd.args(["build", "--release", "--platform", "android", "--arch", arch]);
+        } else {
+            cmd.args(["build", "--platform", "android", "--arch", arch]);
+        }
+
+        let dx_status = cmd.status()?;
 
         if !dx_status.success() {
             return Err(XtaskError::CommandFailed(format!(
-                "dx build --platform android --arch {arch}"
+                "dx build ({mode_str}) --platform android --arch {arch}"
             )));
         }
     }
@@ -264,6 +276,8 @@ fn build_and_patch_dioxus_android(root: &Path) -> Result<()> {
     patch_dx_android_project(root, &gen_android)?;
 
     let gradlew = gen_android.join("gradlew");
+    let assemble_task = if is_release { "assembleRelease" } else { "assembleDebug" };
+
     let assemble_status = Command::new(&gradlew)
         .current_dir(&gen_android)
         .env("ANDROID_HOME", &sdk)
@@ -271,16 +285,26 @@ fn build_and_patch_dioxus_android(root: &Path) -> Result<()> {
         .env("ANDROID_NDK_HOME", &ndk)
         .env("JAVA_HOME", &jdk)
         .env("PATH", &new_path)
-        .arg("assembleDebug")
+        .arg(assemble_task)
         .status()?;
 
     if !assemble_status.success() {
-        return Err(XtaskError::CommandFailed(
-            "gradlew assembleDebug on patched Dioxus project".to_string(),
-        ));
+        return Err(XtaskError::CommandFailed(format!(
+            "gradlew {assemble_task} on patched Dioxus project"
+        )));
     }
 
-    let apk_path = gen_android.join("app/build/outputs/apk/debug/app-debug.apk");
+    let apk_path = if is_release {
+        let rel_apk = gen_android.join("app/build/outputs/apk/release/app-release.apk");
+        if !rel_apk.exists() {
+            gen_android.join("app/build/outputs/apk/release/app-release-unsigned.apk")
+        } else {
+            rel_apk
+        }
+    } else {
+        gen_android.join("app/build/outputs/apk/debug/app-debug.apk")
+    };
+
     println!("==> SUCCESS! Patched APK generated at: {}", apk_path.display());
     Ok(())
 }
@@ -343,6 +367,12 @@ fn patch_dx_android_project(root: &Path, gen_android: &Path) -> Result<()> {
                 "    implementation(\"com.google.mlkit:image-labeling:17.0.8\")"
             );
             content = content.replace("dependencies {", mlkit_deps);
+        }
+        if !content.contains("signingConfig = signingConfigs.getByName(\"debug\")") {
+            content = content.replace(
+                "getByName(\"release\") {",
+                "getByName(\"release\") {\n            signingConfig = signingConfigs.getByName(\"debug\")",
+            );
         }
         fs::write(&gradle_kts, content)?;
     }

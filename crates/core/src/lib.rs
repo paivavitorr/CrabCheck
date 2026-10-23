@@ -1089,6 +1089,173 @@ impl CoreStore {
             notes,
         })
     }
+
+    pub fn calculate_streak_summary(&self, now_epoch_ms: i64) -> Result<StreakSummary> {
+        use std::collections::BTreeMap;
+        use chrono::NaiveDate;
+
+        let mut stmt = self.conn.prepare(
+            "SELECT outcome, recorded_at_epoch_ms
+             FROM alarm_outcomes
+             ORDER BY recorded_at_epoch_ms ASC",
+        )?;
+
+        let mut days_map: BTreeMap<NaiveDate, Vec<String>> = BTreeMap::new();
+        let mut total_completed = 0u32;
+        let mut total_failed = 0u32;
+
+        let rows = stmt.query_map([], |row| {
+            let outcome: String = row.get(0)?;
+            let ts: i64 = row.get(1)?;
+            Ok((outcome, ts))
+        })?;
+
+        for row in rows {
+            let (outcome, ts) = row?;
+            if outcome == "CUMPRIDO" {
+                total_completed += 1;
+            } else if outcome == "FALHOU" {
+                total_failed += 1;
+            }
+            if let LocalResult::Single(dt) | LocalResult::Ambiguous(dt, _) =
+                Local.timestamp_millis_opt(ts)
+            {
+                days_map.entry(dt.date_naive()).or_default().push(outcome);
+            }
+        }
+
+        let today = match Local.timestamp_millis_opt(now_epoch_ms) {
+            LocalResult::Single(dt) | LocalResult::Ambiguous(dt, _) => dt.date_naive(),
+            LocalResult::None => NaiveDate::from_ymd_opt(2026, 10, 23).unwrap(),
+        };
+
+        let is_day_successful = |date: &NaiveDate| -> bool {
+            days_map
+                .get(date)
+                .map_or(false, |outcomes| outcomes.iter().any(|o| o == "CUMPRIDO"))
+        };
+
+        let mut current_streak = 0u32;
+        let mut check_date = today;
+
+        if !is_day_successful(&check_date) {
+            let had_outcomes_today = days_map.contains_key(&today);
+            if !had_outcomes_today {
+                if let Some(yesterday) = today.checked_sub_days(Days::new(1)) {
+                    check_date = yesterday;
+                }
+            }
+        }
+
+        while is_day_successful(&check_date) {
+            current_streak += 1;
+            match check_date.checked_sub_days(Days::new(1)) {
+                Some(prev) => check_date = prev,
+                None => break,
+            }
+        }
+
+        let mut best_streak = 0u32;
+        let mut temp_streak = 0u32;
+        let mut prev_date: Option<NaiveDate> = None;
+
+        for &date in days_map.keys() {
+            if is_day_successful(&date) {
+                if let Some(p) = prev_date {
+                    if (date - p).num_days() == 1 {
+                        temp_streak += 1;
+                    } else {
+                        temp_streak = 1;
+                    }
+                } else {
+                    temp_streak = 1;
+                }
+                prev_date = Some(date);
+                if temp_streak > best_streak {
+                    best_streak = temp_streak;
+                }
+            } else {
+                temp_streak = 0;
+                prev_date = None;
+            }
+        }
+
+        if current_streak > best_streak {
+            best_streak = current_streak;
+        }
+
+        let total_interactions = total_completed + total_failed;
+        let adherence_rate = if total_interactions > 0 {
+            ((total_completed as u64 * 100) / total_interactions as u64) as u8
+        } else {
+            100
+        };
+
+        Ok(StreakSummary {
+            current_streak_days: current_streak,
+            best_streak_days: best_streak,
+            total_completed,
+            total_failed,
+            adherence_rate,
+        })
+    }
+
+    pub fn get_day_outcomes_map(
+        &self,
+        start_epoch_ms: i64,
+        end_epoch_ms: i64,
+    ) -> Result<std::collections::HashMap<String, String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT outcome, recorded_at_epoch_ms
+             FROM alarm_outcomes
+             WHERE recorded_at_epoch_ms >= ?1 AND recorded_at_epoch_ms <= ?2
+             ORDER BY recorded_at_epoch_ms ASC",
+        )?;
+
+        let mut map = std::collections::HashMap::new();
+        let rows = stmt.query_map(params![start_epoch_ms, end_epoch_ms], |row| {
+            let outcome: String = row.get(0)?;
+            let ts: i64 = row.get(1)?;
+            Ok((outcome, ts))
+        })?;
+
+        for row in rows {
+            let (outcome, ts) = row?;
+            if let LocalResult::Single(dt) | LocalResult::Ambiguous(dt, _) =
+                Local.timestamp_millis_opt(ts)
+            {
+                let date_str = dt.format("%Y-%m-%d").to_string();
+                let current_priority = match map.get(&date_str).map(|s: &String| s.as_str()) {
+                    Some("CUMPRIDO") => 4,
+                    Some("FALHOU") => 3,
+                    Some("ADIADO") => 2,
+                    Some("IGNORADO") => 1,
+                    _ => 0,
+                };
+                let new_priority = match outcome.as_str() {
+                    "CUMPRIDO" => 4,
+                    "FALHOU" => 3,
+                    "ADIADO" => 2,
+                    "IGNORADO" => 1,
+                    _ => 0,
+                };
+                if new_priority >= current_priority {
+                    map.insert(date_str, outcome);
+                }
+            }
+        }
+
+        Ok(map)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StreakSummary {
+    pub current_streak_days: u32,
+    pub best_streak_days: u32,
+    pub total_completed: u32,
+    pub total_failed: u32,
+    pub adherence_rate: u8,
 }
 
 #[cfg(test)]
@@ -1336,6 +1503,32 @@ mod tests {
         let snap_after_del = store.daily_timeline(now, None)?;
         assert_eq!(snap_after_del.notes.len(), 1);
         assert_eq!(snap_after_del.notes[0].id, n1.id);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_streak_summary_and_day_outcomes_map() -> Result<()> {
+        let store = CoreStore::open_in_memory()?;
+        let one_day_ms = 86_400_000;
+        let now = 1_700_050_000_000; // e.g., Day 0
+
+        // Day -2: CUMPRIDO
+        store.record_outcome("alarm-1", "CUMPRIDO", now - 2 * one_day_ms)?;
+        // Day -1: CUMPRIDO
+        store.record_outcome("alarm-1", "CUMPRIDO", now - one_day_ms)?;
+        // Day 0: CUMPRIDO
+        store.record_outcome("alarm-1", "CUMPRIDO", now)?;
+
+        let summary = store.calculate_streak_summary(now)?;
+        assert_eq!(summary.current_streak_days, 3);
+        assert_eq!(summary.best_streak_days, 3);
+        assert_eq!(summary.total_completed, 3);
+        assert_eq!(summary.total_failed, 0);
+        assert_eq!(summary.adherence_rate, 100);
+
+        let map = store.get_day_outcomes_map(now - 3 * one_day_ms, now + one_day_ms)?;
+        assert!(map.len() >= 3);
 
         Ok(())
     }

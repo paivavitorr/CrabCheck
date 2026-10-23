@@ -94,6 +94,17 @@ class AlarmAudioService : Service() {
 
     private fun requestAudioFocus() {
         val am = audioManager ?: return
+
+        // Ensure alarm stream volume is at least 80% to avoid silent morning misses
+        try {
+            val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+            val curVol = am.getStreamVolume(AudioManager.STREAM_ALARM)
+            if (curVol < (maxVol * 0.8).toInt()) {
+                am.setStreamVolume(AudioManager.STREAM_ALARM, (maxVol * 0.85).toInt(), 0)
+            }
+        } catch (_: Throwable) {
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val playbackAttributes = AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_ALARM)
@@ -134,6 +145,7 @@ class AlarmAudioService : Service() {
 
         try {
             val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
                 ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
 
             val player = MediaPlayer().apply {
@@ -156,10 +168,11 @@ class AlarmAudioService : Service() {
 
     private fun startVibration() {
         val vib = vibrator ?: return
-        val pattern = longArrayOf(0, 800, 400, 800)
+        val pattern = longArrayOf(0, 1000, 300, 1000, 300, 1000)
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                vib.vibrate(VibrationEffect.createWaveform(pattern, 0))
+                val amplitudes = intArrayOf(0, 255, 0, 255, 0, 255)
+                vib.vibrate(VibrationEffect.createWaveform(pattern, amplitudes, 0))
             } else {
                 @Suppress("DEPRECATION")
                 vib.vibrate(pattern, 0)
