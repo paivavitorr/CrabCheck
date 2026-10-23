@@ -77,10 +77,17 @@ fn find_android_sdk() -> Result<PathBuf> {
 }
 
 fn find_ndk(sdk: &Path) -> Result<PathBuf> {
-    if let Ok(ndk) = env::var("ANDROID_NDK_HOME").or_else(|_| env::var("NDK_HOME")) {
-        let p = PathBuf::from(ndk);
-        if p.exists() {
-            return Ok(p);
+    for var in [
+        "ANDROID_NDK_HOME",
+        "ANDROID_NDK_ROOT",
+        "ANDROID_NDK_LATEST_HOME",
+        "NDK_HOME",
+    ] {
+        if let Ok(ndk) = env::var(var) {
+            let p = PathBuf::from(ndk);
+            if p.exists() {
+                return Ok(p);
+            }
         }
     }
     let ndk_root = sdk.join("ndk");
@@ -98,6 +105,12 @@ fn find_ndk(sdk: &Path) -> Result<PathBuf> {
 }
 
 fn find_jdk17() -> Result<PathBuf> {
+    if let Ok(jh) = env::var("JAVA_HOME") {
+        let p = PathBuf::from(jh);
+        if p.join("bin/javac").exists() {
+            return Ok(p);
+        }
+    }
     let home = env::var("HOME").map_err(|_| XtaskError::MissingPath("HOME".to_string()))?;
     for candidate in [
         PathBuf::from(&home).join("jdk17"),
@@ -108,28 +121,43 @@ fn find_jdk17() -> Result<PathBuf> {
             return Ok(candidate);
         }
     }
-    if let Ok(jh) = env::var("JAVA_HOME") {
-        let p = PathBuf::from(jh);
-        if p.join("bin/javac").exists() {
-            return Ok(p);
-        }
-    }
     Err(XtaskError::MissingPath("JDK 17 JAVA_HOME".to_string()))
 }
 
 fn find_gradle_bin() -> Result<PathBuf> {
-    let home = env::var("HOME").map_err(|_| XtaskError::MissingPath("HOME".to_string()))?;
-    let dists = PathBuf::from(home).join(".gradle/wrapper/dists");
-    if dists.exists() {
-        for version_dir in ["gradle-8.12-bin", "gradle-8.9-bin"] {
-            let base = dists.join(version_dir);
-            if base.exists() {
-                for entry in fs::read_dir(base)? {
-                    let sub = entry?.path();
-                    for inner in fs::read_dir(sub)? {
-                        let bin = inner?.path().join("bin/gradle");
-                        if bin.exists() {
-                            return Ok(bin);
+    // 1. Check explicit GRADLE_BIN environment variable
+    if let Ok(bin) = env::var("GRADLE_BIN") {
+        let p = PathBuf::from(bin);
+        if p.exists() {
+            return Ok(p);
+        }
+    }
+    // 2. Check system PATH
+    if let Ok(path) = env::var("PATH") {
+        for dir in env::split_paths(&path) {
+            let candidate = dir.join("gradle");
+            if candidate.exists() {
+                return Ok(candidate);
+            }
+        }
+    }
+    // 3. Fallback to cached gradle wrappers in ~/.gradle/wrapper/dists
+    if let Ok(home) = env::var("HOME") {
+        let dists = PathBuf::from(home).join(".gradle/wrapper/dists");
+        if dists.exists() {
+            if let Ok(entries) = fs::read_dir(&dists) {
+                for version_dir in entries.flatten() {
+                    let base = version_dir.path();
+                    if let Ok(subs) = fs::read_dir(&base) {
+                        for sub in subs.flatten() {
+                            if let Ok(inners) = fs::read_dir(sub.path()) {
+                                for inner in inners.flatten() {
+                                    let bin = inner.path().join("bin/gradle");
+                                    if bin.exists() {
+                                        return Ok(bin);
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -137,7 +165,7 @@ fn find_gradle_bin() -> Result<PathBuf> {
         }
     }
     Err(XtaskError::MissingPath(
-        "Cached gradle binary in ~/.gradle/wrapper/dists".to_string(),
+        "Gradle binary (not found in PATH, GRADLE_BIN or ~/.gradle/wrapper/dists)".to_string(),
     ))
 }
 
