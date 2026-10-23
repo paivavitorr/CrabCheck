@@ -18,6 +18,8 @@ static KEEP_FFI: fn(
 
 static DB_PATH_CACHE: OnceLock<String> = OnceLock::new();
 
+const CRABCHECK_LOGO_DATA_URI: &str = include_str!("../assets/crab_b64.txt");
+
 const WEEKDAY_NAMES: &[(&str, u8)] = &[
     ("Seg", 1 << 0),
     ("Ter", 1 << 1),
@@ -27,6 +29,159 @@ const WEEKDAY_NAMES: &[(&str, u8)] = &[
     ("Sáb", 1 << 5),
     ("Dom", 1 << 6),
 ];
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CalendarWeekDay {
+    offset: i64,
+    day_num: u32,
+    weekday_short: &'static str,
+    is_today: bool,
+    is_selected: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MonthGridDay {
+    offset: i64,
+    day_num: u32,
+    is_today: bool,
+    is_selected: bool,
+}
+
+fn calculate_week_strip(now_epoch_ms: i64, selected_offset: i64) -> (String, Vec<CalendarWeekDay>) {
+    use chrono::{Datelike, Days, Local, LocalResult, NaiveDate, TimeZone};
+
+    let today = match Local.timestamp_millis_opt(now_epoch_ms) {
+        LocalResult::Single(dt) | LocalResult::Ambiguous(dt, _) => dt.date_naive(),
+        LocalResult::None => NaiveDate::from_ymd_opt(2026, 10, 23).unwrap(),
+    };
+
+    let selected_date = if selected_offset >= 0 {
+        today.checked_add_days(Days::new(selected_offset as u64)).unwrap_or(today)
+    } else {
+        today.checked_sub_days(Days::new((-selected_offset) as u64)).unwrap_or(today)
+    };
+
+    let weekday_idx = selected_date.weekday().num_days_from_monday();
+    let monday = selected_date.checked_sub_days(Days::new(weekday_idx as u64)).unwrap_or(selected_date);
+
+    let weekday_labels = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
+    let mut days = Vec::with_capacity(7);
+
+    for (i, label) in weekday_labels.iter().enumerate() {
+        if let Some(d) = monday.checked_add_days(Days::new(i as u64)) {
+            let offset = (d - today).num_days();
+            days.push(CalendarWeekDay {
+                offset,
+                day_num: d.day(),
+                weekday_short: label,
+                is_today: d == today,
+                is_selected: offset == selected_offset,
+            });
+        }
+    }
+
+    let month_name = match selected_date.month() {
+        1 => "Janeiro", 2 => "Fevereiro", 3 => "Março", 4 => "Abril",
+        5 => "Maio", 6 => "Junho", 7 => "Julho", 8 => "Agosto",
+        9 => "Setembro", 10 => "Outubro", 11 => "Novembro", 12 => "Dezembro",
+        _ => "",
+    };
+    let month_header = format!("{month_name} {}", selected_date.year());
+
+    (month_header, days)
+}
+
+fn calculate_month_grid(now_epoch_ms: i64, selected_offset: i64) -> (String, Vec<Option<MonthGridDay>>) {
+    use chrono::{Datelike, Days, Local, LocalResult, NaiveDate, TimeZone};
+
+    let today = match Local.timestamp_millis_opt(now_epoch_ms) {
+        LocalResult::Single(dt) | LocalResult::Ambiguous(dt, _) => dt.date_naive(),
+        LocalResult::None => NaiveDate::from_ymd_opt(2026, 10, 23).unwrap(),
+    };
+
+    let selected_date = if selected_offset >= 0 {
+        today.checked_add_days(Days::new(selected_offset as u64)).unwrap_or(today)
+    } else {
+        today.checked_sub_days(Days::new((-selected_offset) as u64)).unwrap_or(today)
+    };
+
+    let y = selected_date.year();
+    let m = selected_date.month();
+    let first_day = NaiveDate::from_ymd_opt(y, m, 1).unwrap_or(selected_date);
+    let start_col = first_day.weekday().num_days_from_monday() as usize;
+
+    let days_in_month = if m == 12 {
+        NaiveDate::from_ymd_opt(y + 1, 1, 1).unwrap_or(first_day) - first_day
+    } else {
+        NaiveDate::from_ymd_opt(y, m + 1, 1).unwrap_or(first_day) - first_day
+    }.num_days() as u32;
+
+    let mut grid = Vec::new();
+    for _ in 0..start_col {
+        grid.push(None);
+    }
+    for d in 1..=days_in_month {
+        if let Some(date) = NaiveDate::from_ymd_opt(y, m, d) {
+            let offset = (date - today).num_days();
+            grid.push(Some(MonthGridDay {
+                offset,
+                day_num: d,
+                is_today: date == today,
+                is_selected: offset == selected_offset,
+            }));
+        }
+    }
+
+    let month_name = match m {
+        1 => "Janeiro", 2 => "Fevereiro", 3 => "Março", 4 => "Abril",
+        5 => "Maio", 6 => "Junho", 7 => "Julho", 8 => "Agosto",
+        9 => "Setembro", 10 => "Outubro", 11 => "Novembro", 12 => "Dezembro",
+        _ => "",
+    };
+    let month_header = format!("{month_name} {y}");
+
+    (month_header, grid)
+}
+
+fn prev_month_offset(now_ms: i64, current_offset: i64) -> i64 {
+    use chrono::{Datelike, Days, Local, LocalResult, NaiveDate, TimeZone};
+    let today = match Local.timestamp_millis_opt(now_ms) {
+        LocalResult::Single(dt) | LocalResult::Ambiguous(dt, _) => dt.date_naive(),
+        LocalResult::None => NaiveDate::from_ymd_opt(2026, 10, 23).unwrap(),
+    };
+    let current_date = if current_offset >= 0 {
+        today.checked_add_days(Days::new(current_offset as u64)).unwrap_or(today)
+    } else {
+        today.checked_sub_days(Days::new((-current_offset) as u64)).unwrap_or(today)
+    };
+    let (prev_y, prev_m) = if current_date.month() == 1 {
+        (current_date.year() - 1, 12)
+    } else {
+        (current_date.year(), current_date.month() - 1)
+    };
+    let target = NaiveDate::from_ymd_opt(prev_y, prev_m, 1).unwrap_or(current_date);
+    (target - today).num_days()
+}
+
+fn next_month_offset(now_ms: i64, current_offset: i64) -> i64 {
+    use chrono::{Datelike, Days, Local, LocalResult, NaiveDate, TimeZone};
+    let today = match Local.timestamp_millis_opt(now_ms) {
+        LocalResult::Single(dt) | LocalResult::Ambiguous(dt, _) => dt.date_naive(),
+        LocalResult::None => NaiveDate::from_ymd_opt(2026, 10, 23).unwrap(),
+    };
+    let current_date = if current_offset >= 0 {
+        today.checked_add_days(Days::new(current_offset as u64)).unwrap_or(today)
+    } else {
+        today.checked_sub_days(Days::new((-current_offset) as u64)).unwrap_or(today)
+    };
+    let (next_y, next_m) = if current_date.month() == 12 {
+        (current_date.year() + 1, 1)
+    } else {
+        (current_date.year(), current_date.month() + 1)
+    };
+    let target = NaiveDate::from_ymd_opt(next_y, next_m, 1).unwrap_or(current_date);
+    (target - today).num_days()
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ActiveTab {
@@ -154,6 +309,7 @@ fn App() -> Element {
 
     // Timeline signals
     let mut selected_day_offset = use_signal(|| 0i64);
+    let mut show_month_picker = use_signal(|| false);
     let mut active_tag_filter = use_signal(|| Option::<String>::None);
     let mut note_draft = use_signal(String::new);
     let mut timeline_snapshot = use_signal(|| {
@@ -173,8 +329,7 @@ fn App() -> Element {
     });
     let mut selected_alarm_id = use_signal(|| Option::<String>::None);
     let mut outcomes = use_signal(Vec::<AlarmOutcomeRecord>::new);
-    let mut status_msg =
-        use_signal(|| String::from("Bem-vindo ao CrabCheck — Agenda e Prova de Ação."));
+    let mut status_msg = use_signal(String::new);
     let mut cooldown_blocked_id = use_signal(|| Option::<String>::None);
 
     // Form signals
@@ -360,702 +515,794 @@ fn App() -> Element {
     let snap = timeline_snapshot();
     let current_health = health_state();
     let granted_count = current_health.granted_count();
+    let now_epoch = current_epoch_ms();
+    let (week_month_title, week_days) = calculate_week_strip(now_epoch, selected_day_offset());
+    let (month_title, month_cells) = calculate_month_grid(now_epoch, selected_day_offset());
+
+    const GLOBAL_CSS: &str = r#"
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        html, body {
+            margin: 0;
+            padding: 0;
+            background: #F6F7F9;
+            color: #101828;
+            font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+        .app-shell {
+            min-height: 100vh;
+            max-width: 520px;
+            margin: 0 auto;
+            padding: 0 0 84px 0;
+            background: #F6F7F9;
+        }
+        .topbar {
+            position: sticky;
+            top: 0;
+            z-index: 20;
+            background: rgba(255, 255, 255, 0.94);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid #E4E7EC;
+            padding: 13px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .brand-row {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+        }
+        .brand-logo-img {
+            width: 26px;
+            height: 26px;
+            border-radius: 6px;
+            object-fit: contain;
+        }
+        .brand-mark {
+            width: 24px;
+            height: 24px;
+            border-radius: 6px;
+            background: #101828;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .brand-name {
+            margin: 0;
+            font-size: 16px;
+            font-weight: 600;
+            letter-spacing: -0.02em;
+            color: #101828;
+        }
+        .health-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 500;
+            background: #F2F4F7;
+            color: #344054;
+            border: 1px solid #E4E7EC;
+            cursor: pointer;
+        }
+        .dot-ok {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #12B76A;
+        }
+        .dot-warn {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #F79009;
+        }
+        .page-body {
+            padding: 16px;
+        }
+        .surface-group {
+            background: #FFFFFF;
+            border: 1px solid #E4E7EC;
+            border-radius: 12px;
+            overflow: hidden;
+            margin-bottom: 16px;
+        }
+        .surface-pad {
+            background: #FFFFFF;
+            border: 1px solid #E4E7EC;
+            border-radius: 12px;
+            padding: 14px;
+            margin-bottom: 16px;
+        }
+        .list-row {
+            padding: 13px 14px;
+            border-bottom: 1px solid #F2F4F7;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+        }
+        .list-row:last-child {
+            border-bottom: none;
+        }
+        .section-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin: 20px 2px 8px 2px;
+        }
+        .section-head:first-child {
+            margin-top: 4px;
+        }
+        .section-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #475467;
+            margin: 0;
+        }
+        .section-meta {
+            font-size: 12px;
+            color: #667085;
+        }
+        .time-display {
+            font-variant-numeric: tabular-nums;
+            font-size: 25px;
+            font-weight: 600;
+            letter-spacing: -0.03em;
+            color: #101828;
+            line-height: 1;
+            min-width: 66px;
+        }
+        .field-input {
+            width: 100%;
+            padding: 9px 11px;
+            background: #FFFFFF;
+            border: 1px solid #D0D5DD;
+            border-radius: 8px;
+            font-size: 14px;
+            color: #101828;
+            outline: none;
+        }
+        .btn-primary {
+            padding: 9px 14px;
+            background: #101828;
+            color: #FFFFFF;
+            border: 1px solid #101828;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        .btn-secondary {
+            padding: 6px 11px;
+            background: #FFFFFF;
+            color: #344054;
+            border: 1px solid #D0D5DD;
+            border-radius: 7px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .btn-danger-ghost {
+            padding: 6px 11px;
+            background: #FFFFFF;
+            color: #B42318;
+            border: 1px solid #FDA29B;
+            border-radius: 7px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .bottom-nav {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 62px;
+            background: rgba(255, 255, 255, 0.96);
+            backdrop-filter: blur(10px);
+            border-top: 1px solid #E4E7EC;
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            z-index: 30;
+            max-width: 520px;
+            margin: 0 auto;
+        }
+        .nav-item {
+            flex: 1;
+            height: 100%;
+            background: transparent;
+            border: none;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            font-size: 11px;
+            font-weight: 500;
+            color: #667085;
+        }
+        .nav-item-active {
+            color: #101828;
+            font-weight: 600;
+        }
+        .cal-card {
+            background: #FFFFFF;
+            border: 1px solid #E4E7EC;
+            border-radius: 12px;
+            padding: 12px;
+            margin-bottom: 14px;
+        }
+        .cal-top-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .cal-title-btn {
+            background: transparent;
+            border: none;
+            padding: 4px 6px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #101828;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            border-radius: 6px;
+        }
+        .cal-nav-group {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .cal-btn-today {
+            padding: 4px 9px;
+            background: #F2F4F7;
+            color: #344054;
+            border: 1px solid #D0D5DD;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .cal-nav-arrow {
+            width: 28px;
+            height: 28px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: #FFFFFF;
+            border: 1px solid #D0D5DD;
+            border-radius: 6px;
+            color: #344054;
+            font-size: 11px;
+            cursor: pointer;
+        }
+        .week-strip-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 4px;
+        }
+        .cal-day-cell {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 6px 2px;
+            border-radius: 8px;
+            background: transparent;
+            border: 1px solid transparent;
+            cursor: pointer;
+        }
+        .cal-day-weekday {
+            font-size: 10px;
+            font-weight: 500;
+            color: #667085;
+            text-transform: uppercase;
+            letter-spacing: 0.02em;
+            margin-bottom: 3px;
+        }
+        .cal-day-num {
+            font-size: 14px;
+            font-weight: 600;
+            font-variant-numeric: tabular-nums;
+            color: #101828;
+            width: 26px;
+            height: 26px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+        }
+        .cal-day-cell.is-selected .cal-day-num {
+            background: #101828;
+            color: #FFFFFF;
+        }
+        .cal-day-cell.is-selected .cal-day-weekday {
+            color: #101828;
+            font-weight: 600;
+        }
+        .cal-day-cell.is-today:not(.is-selected) .cal-day-num {
+            border: 1.5px solid #101828;
+            color: #101828;
+        }
+        .cal-month-table {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 4px;
+            margin-top: 6px;
+        }
+        .cal-weekday-header {
+            font-size: 10px;
+            font-weight: 600;
+            color: #98A2B3;
+            text-align: center;
+            padding-bottom: 4px;
+            text-transform: uppercase;
+        }
+        .cal-month-cell {
+            aspect-ratio: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+            background: transparent;
+            border: 1px solid transparent;
+            font-size: 13px;
+            font-weight: 500;
+            font-variant-numeric: tabular-nums;
+            color: #101828;
+            cursor: pointer;
+        }
+        .cal-month-cell.is-selected {
+            background: #101828;
+            color: #FFFFFF;
+            font-weight: 600;
+        }
+        .cal-month-cell.is-today:not(.is-selected) {
+            border: 1.5px solid #101828;
+            font-weight: 600;
+        }
+        .cal-month-cell.is-empty {
+            cursor: default;
+        }
+    "#;
 
     rsx! {
         div {
-            style: "font-family: sans-serif; padding: 14px; max-width: 560px; margin: 0 auto; color: #1f2937;",
+            class: "app-shell",
+            style { "{GLOBAL_CSS}" }
 
-            // Header
-            div {
-                style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;",
-                h1 { style: "margin: 0; font-size: 22px;", "CrabCheck" }
-                span {
-                    style: if current_health.all_granted() {
-                        "font-size: 12px; padding: 4px 8px; background: #d1fae5; color: #065f46; border-radius: 12px; font-weight: bold;"
-                    } else {
-                        "font-size: 12px; padding: 4px 8px; background: #fee2e2; color: #991b1b; border-radius: 12px; font-weight: bold;"
-                    },
-                    "Saúde: {granted_count}/6"
-                }
-            }
-
-            // Status bar
-            p {
-                style: "background: #f3f4f6; padding: 10px; border-radius: 6px; font-size: 13px; margin: 0 0 12px 0;",
-                "{status_msg}"
-            }
-
-            // Global Onboarding Alert if any critical permission is missing
-            if !current_health.all_granted() && active_tab() != ActiveTab::Health {
+            // Sticky Minimal Top Bar
+            header {
+                class: "topbar",
                 div {
-                    style: "background: #fffbeb; border: 1px solid #f59e0b; padding: 10px; border-radius: 6px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; gap: 8px;",
-                    div {
-                        style: "font-size: 12px; color: #92400e;",
-                        strong { "Onboarding Pendente ({granted_count}/6): " }
-                        "Conceda todas as permissões críticas para criar ou ativar hábitos Nível 3."
+                    class: "brand-row",
+                    img {
+                        class: "brand-logo-img",
+                        src: "{CRABCHECK_LOGO_DATA_URI}",
+                        alt: "CrabCheck",
                     }
-                    button {
-                        style: "padding: 6px 10px; background: #d97706; color: white; border: none; border-radius: 4px; font-size: 12px; font-weight: bold; white-space: nowrap;",
-                        onclick: move |_| {
-                            health_state.set(check_native_permissions());
-                            active_tab.set(ActiveTab::Health);
-                        },
-                        "Configurar"
-                    }
-                }
-            }
-
-            // Navigation Tabs
-            div {
-                style: "display: flex; gap: 6px; margin-bottom: 16px; border-bottom: 2px solid #e5e7eb; padding-bottom: 8px;",
-                button {
-                    style: if active_tab() == ActiveTab::Timeline {
-                        "flex: 1; padding: 9px; background: #111827; color: white; border: none; border-radius: 6px; font-weight: bold; font-size: 13px;"
-                    } else {
-                        "flex: 1; padding: 9px; background: #f3f4f6; color: #374151; border: none; border-radius: 6px; font-size: 13px;"
-                    },
-                    onclick: move |_| {
-                        active_tab.set(ActiveTab::Timeline);
-                        reload_all(None);
-                    },
-                    "Timeline Diária"
+                    h1 { class: "brand-name", "CrabCheck" }
                 }
                 button {
-                    style: if active_tab() == ActiveTab::Habits {
-                        "flex: 1; padding: 9px; background: #111827; color: white; border: none; border-radius: 6px; font-weight: bold; font-size: 13px;"
-                    } else {
-                        "flex: 1; padding: 9px; background: #f3f4f6; color: #374151; border: none; border-radius: 6px; font-size: 13px;"
-                    },
-                    onclick: move |_| {
-                        active_tab.set(ActiveTab::Habits);
-                        reload_all(None);
-                    },
-                    "Hábitos ({alarms().len()})"
-                }
-                button {
-                    style: if active_tab() == ActiveTab::Health {
-                        "flex: 1; padding: 9px; background: #111827; color: white; border: none; border-radius: 6px; font-weight: bold; font-size: 13px;"
-                    } else {
-                        "flex: 1; padding: 9px; background: #f3f4f6; color: #374151; border: none; border-radius: 6px; font-size: 13px;"
-                    },
+                    class: "health-pill",
                     onclick: move |_| {
                         health_state.set(check_native_permissions());
                         active_tab.set(ActiveTab::Health);
                     },
-                    "Permissões ({granted_count}/6)"
+                    span {
+                        class: if current_health.all_granted() { "dot-ok" } else { "dot-warn" }
+                    }
+                    "{granted_count}/6 permissões"
                 }
             }
 
-            // TAB 1: TIMELINE DIÁRIA
-            if active_tab() == ActiveTab::Timeline {
-                div {
-                    // Date Navigation Bar
+            div {
+                class: "page-body",
+
+                // Subtle dismissible toast only when status_msg is non-empty
+                if !status_msg().is_empty() {
                     div {
-                        style: "display: flex; justify-content: space-between; align-items: center; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px 12px; margin-bottom: 14px;",
+                        style: "background: #101828; color: #F9FAFB; padding: 10px 12px; border-radius: 8px; font-size: 12px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; gap: 8px;",
+                        span { "{status_msg}" }
                         button {
-                            style: "padding: 6px 10px; background: #e5e7eb; color: #1f2937; border: none; border-radius: 4px; font-size: 12px; font-weight: bold;",
-                            onclick: move |_| {
-                                let next_offset = selected_day_offset() - 1;
-                                selected_day_offset.set(next_offset);
-                                refresh_timeline(next_offset, active_tag_filter.read().clone());
-                            },
-                            "◀ Anterior"
+                            style: "background: transparent; border: none; color: #98A2B3; font-size: 14px; padding: 0 4px;",
+                            onclick: move |_| status_msg.set(String::new()),
+                            "×"
                         }
+                    }
+                }
+
+                // Quiet permission banner only when incomplete
+                if !current_health.all_granted() && active_tab() != ActiveTab::Health {
+                    div {
+                        style: "background: #FFFAEB; border: 1px solid #FEDF89; padding: 11px 13px; border-radius: 10px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; gap: 10px;",
                         div {
-                            style: "text-align: center;",
-                            strong { style: "font-size: 15px;", "{snap.date_iso}" }
-                            if selected_day_offset() == 0 {
-                                span {
-                                    style: "margin-left: 6px; font-size: 11px; padding: 2px 6px; background: #dbeafe; color: #1e40af; border-radius: 4px;",
-                                    "Hoje"
+                            style: "font-size: 12px; color: #93370D; line-height: 1.4;",
+                            "Faltam permissões do sistema ({granted_count}/6) para utilizar o Nível 3."
+                        }
+                        button {
+                            class: "btn-secondary",
+                            style: "border-color: #F79009; color: #93370D; white-space: nowrap;",
+                            onclick: move |_| {
+                                health_state.set(check_native_permissions());
+                                active_tab.set(ActiveTab::Health);
+                            },
+                            "Configurar"
+                        }
+                    }
+                }
+
+                // TAB 1: HOJE (TIMELINE DIÁRIA)
+                if active_tab() == ActiveTab::Timeline {
+                    div {
+                        // Calendar Card (Week Strip + toggleable Month Grid)
+                        div {
+                            class: "cal-card",
+                            div {
+                                class: "cal-top-row",
+                                button {
+                                    class: "cal-title-btn",
+                                    onclick: move |_| show_month_picker.set(!show_month_picker()),
+                                    span { if show_month_picker() { "{month_title}" } else { "{week_month_title}" } }
+                                    span { style: "font-size: 10px; color: #667085;", if show_month_picker() { "▴" } else { "▾" } }
+                                }
+                                div {
+                                    class: "cal-nav-group",
+                                    if selected_day_offset() != 0 {
+                                        button {
+                                            class: "cal-btn-today",
+                                            onclick: move |_| {
+                                                selected_day_offset.set(0);
+                                                refresh_timeline(0, active_tag_filter.read().clone());
+                                            },
+                                            "Hoje"
+                                        }
+                                    }
+                                    button {
+                                        class: "cal-nav-arrow",
+                                        title: "Anterior",
+                                        onclick: move |_| {
+                                            let next_offset = if show_month_picker() {
+                                                prev_month_offset(now_epoch, selected_day_offset())
+                                            } else {
+                                                selected_day_offset() - 7
+                                            };
+                                            selected_day_offset.set(next_offset);
+                                            refresh_timeline(next_offset, active_tag_filter.read().clone());
+                                        },
+                                        "◀"
+                                    }
+                                    button {
+                                        class: "cal-nav-arrow",
+                                        title: "Seguinte",
+                                        onclick: move |_| {
+                                            let next_offset = if show_month_picker() {
+                                                next_month_offset(now_epoch, selected_day_offset())
+                                            } else {
+                                                selected_day_offset() + 7
+                                            };
+                                            selected_day_offset.set(next_offset);
+                                            refresh_timeline(next_offset, active_tag_filter.read().clone());
+                                        },
+                                        "▶"
+                                    }
+                                }
+                            }
+
+                            if !show_month_picker() {
+                                div {
+                                    class: "week-strip-grid",
+                                    for day in week_days {
+                                        {
+                                            let day_offset = day.offset;
+                                            let mut classes = String::from("cal-day-cell");
+                                            if day.is_selected {
+                                                classes.push_str(" is-selected");
+                                            }
+                                            if day.is_today {
+                                                classes.push_str(" is-today");
+                                            }
+                                            rsx! {
+                                                button {
+                                                    key: "{day.offset}",
+                                                    class: "{classes}",
+                                                    onclick: move |_| {
+                                                        selected_day_offset.set(day_offset);
+                                                        refresh_timeline(day_offset, active_tag_filter.read().clone());
+                                                    },
+                                                    span { class: "cal-day-weekday", "{day.weekday_short}" }
+                                                    span { class: "cal-day-num", "{day.day_num}" }
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             } else {
-                                button {
-                                    style: "margin-left: 8px; padding: 2px 8px; background: #2563eb; color: white; border: none; border-radius: 4px; font-size: 11px;",
-                                    onclick: move |_| {
-                                        selected_day_offset.set(0);
-                                        refresh_timeline(0, active_tag_filter.read().clone());
-                                    },
-                                    "Ir para Hoje"
-                                }
-                            }
-                        }
-                        button {
-                            style: "padding: 6px 10px; background: #e5e7eb; color: #1f2937; border: none; border-radius: 4px; font-size: 12px; font-weight: bold;",
-                            onclick: move |_| {
-                                let next_offset = selected_day_offset() + 1;
-                                selected_day_offset.set(next_offset);
-                                refresh_timeline(next_offset, active_tag_filter.read().clone());
-                            },
-                            "Seguinte ▶"
-                        }
-                    }
-
-                    // Quick Note Composer (Memos-style)
-                    div {
-                        style: "border: 1px solid #d1d5db; border-radius: 8px; padding: 12px; margin-bottom: 16px; background: #ffffff;",
-                        label {
-                            style: "display: block; font-size: 13px; font-weight: bold; margin-bottom: 6px;",
-                            "Nova Nota Rápida (use #tags para organizar)"
-                        }
-                        div {
-                            style: "display: flex; gap: 8px;",
-                            input {
-                                style: "flex: 1; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px;",
-                                r#type: "text",
-                                placeholder: "Ex.: Treino concluído sem falhas #foco #energia",
-                                value: "{note_draft}",
-                                oninput: move |evt| note_draft.set(evt.value())
-                            }
-                            button {
-                                style: "padding: 8px 14px; background: #008577; color: white; border: none; border-radius: 6px; font-weight: bold; font-size: 13px;",
-                                onclick: save_quick_note,
-                                "Guardar Nota"
-                            }
-                        }
-                    }
-
-                    // Active #tag filter indicator
-                    if let Some(tag) = active_tag_filter() {
-                        div {
-                            style: "display: flex; justify-content: space-between; align-items: center; background: #eff6ff; border: 1px solid #93c5fd; padding: 8px 12px; border-radius: 6px; margin-bottom: 14px;",
-                            span {
-                                style: "font-size: 13px; color: #1e3a8a;",
-                                "A filtrar notas pela tag: "
-                                strong { "#{tag}" }
-                            }
-                            button {
-                                style: "padding: 4px 8px; background: #1d4ed8; color: white; border: none; border-radius: 4px; font-size: 11px;",
-                                onclick: move |_| {
-                                    active_tag_filter.set(None);
-                                    refresh_timeline(selected_day_offset(), None);
-                                },
-                                "Limpar Filtro"
-                            }
-                        }
-                    }
-
-                    // Section 1: Scheduled Habits for this Day
-                    h2 { style: "font-size: 16px; margin: 0 0 8px 0;", "Hábitos Agendados do Dia ({snap.scheduled_alarms.len()})" }
-                    if snap.scheduled_alarms.is_empty() {
-                        p { style: "font-size: 13px; color: #6b7280; margin-bottom: 16px;", "Nenhum hábito agendado para esta data." }
-                    }
-                    for item in snap.scheduled_alarms.iter() {
-                        {
-                            let id_for_test = item.id.clone();
-                            rsx! {
                                 div {
-                                    key: "sched-{item.id}",
-                                    style: "border-left: 4px solid #2563eb; background: #f9fafb; padding: 10px 12px; border-radius: 6px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;",
-                                    div {
-                                        strong { style: "font-size: 14px;", "{item.hour:02}:{item.minute:02} — {item.title}" }
-                                        div {
-                                            style: "font-size: 12px; color: #4b5563; margin-top: 2px;",
-                                            "Nível {item.level.as_i32()} | Janela: {item.grace_window_minutes}m"
-                                            if item.level == AlarmLevel::ProofOfAction {
-                                                " | Prova: {item.target_label}"
-                                            }
-                                        }
+                                    class: "cal-month-table",
+                                    for lbl in ["S", "T", "Q", "Q", "S", "S", "D"] {
+                                        span { class: "cal-weekday-header", "{lbl}" }
                                     }
-                                    button {
-                                        style: "padding: 5px 8px; background: #d81b60; color: white; border: none; border-radius: 4px; font-size: 11px;",
-                                        onclick: move |_| {
-                                            let test_trigger = current_epoch_ms() + 10_000;
-                                            match schedule_native_alarm(&id_for_test, test_trigger) {
-                                                Ok(()) => status_msg.set(format!("Disparo de teste agendado para +10s ({id_for_test}).")),
-                                                Err(err) => status_msg.set(format!("Falha JNI: {err}")),
-                                            }
-                                        },
-                                        "Testar +10s"
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Section 2: Recorded Outcomes & Visual Proofs of the Day
-                    h2 { style: "font-size: 16px; margin: 16px 0 8px 0;", "Resultados e Provas do Dia ({snap.outcomes.len()})" }
-                    if snap.outcomes.is_empty() {
-                        p { style: "font-size: 13px; color: #6b7280; margin-bottom: 16px;", "Sem resultados registados nesta data." }
-                    }
-                    for out in snap.outcomes.iter() {
-                        {
-                            let time_str = format_local_time_hms(out.recorded_at_epoch_ms);
-                            let badge_style = match out.outcome.as_str() {
-                                "CUMPRIDO" => "padding: 2px 6px; background: #d1fae5; color: #065f46; border-radius: 4px; font-weight: bold; font-size: 11px;",
-                                "FALHOU" => "padding: 2px 6px; background: #fee2e2; color: #991b1b; border-radius: 4px; font-weight: bold; font-size: 11px;",
-                                "ADIADO" => "padding: 2px 6px; background: #fef3c7; color: #92400e; border-radius: 4px; font-weight: bold; font-size: 11px;",
-                                _ => "padding: 2px 6px; background: #e5e7eb; color: #374151; border-radius: 4px; font-weight: bold; font-size: 11px;",
-                            };
-                            rsx! {
-                                div {
-                                    key: "tl-out-{out.id}",
-                                    style: "border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px 12px; margin-bottom: 8px; background: #ffffff;",
-                                    div {
-                                        style: "display: flex; justify-content: space-between; align-items: center;",
-                                        strong { style: "font-size: 13px;", "{time_str} — {out.alarm_title} (N{out.alarm_level.as_i32()})" }
-                                        span { style: "{badge_style}", "{out.outcome}" }
-                                    }
-                                    if let Some(lbl) = &out.matched_label {
-                                        div {
-                                            style: "font-size: 12px; color: #374151; margin-top: 4px;",
-                                            if let Some(conf) = out.confidence {
-                                                "Reconhecimento ML Kit: {lbl} ({conf * 100.0:.0}%)"
-                                            } else {
-                                                "Reconhecimento ML Kit: {lbl}"
-                                            }
-                                        }
-                                    }
-                                    if let Some(path) = &out.proof_image_path {
-                                        div {
-                                            style: "font-size: 11px; color: #047857; margin-top: 4px; word-break: break-all;",
-                                            "📷 Prova gravada: {path}"
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Section 3: Quick Notes of the Day
-                    h2 { style: "font-size: 16px; margin: 16px 0 8px 0;", "Notas Rápidas ({snap.notes.len()})" }
-                    if snap.notes.is_empty() {
-                        p { style: "font-size: 13px; color: #6b7280;", "Nenhuma nota rápida registada nesta data." }
-                    }
-                    for note in snap.notes.iter() {
-                        {
-                            let note_id = note.id.clone();
-                            let time_str = format_local_time_hm(note.created_at_epoch_ms);
-                            rsx! {
-                                div {
-                                    key: "note-{note.id}",
-                                    style: "border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px 12px; margin-bottom: 8px; background: #fffbeb;",
-                                    div {
-                                        style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;",
-                                        span { style: "font-size: 11px; color: #6b7280;", "🕒 {time_str}" }
-                                        button {
-                                            style: "padding: 2px 6px; background: #ef4444; color: white; border: none; border-radius: 4px; font-size: 11px;",
-                                            onclick: move |_| {
-                                                let db = resolve_db_path();
-                                                let now_ms = current_epoch_ms();
-                                                if let Ok(store) = CoreStore::open(db) {
-                                                    if store.delete_note(&note_id, now_ms).is_ok() {
-                                                        status_msg.set(String::from("Nota excluída."));
-                                                        refresh_timeline(selected_day_offset(), active_tag_filter.read().clone());
-                                                    }
+                                    for (idx, maybe_day) in month_cells.into_iter().enumerate() {
+                                        if let Some(day) = maybe_day {
+                                            {
+                                                let day_offset = day.offset;
+                                                let mut classes = String::from("cal-month-cell");
+                                                if day.is_selected {
+                                                    classes.push_str(" is-selected");
                                                 }
-                                            },
-                                            "Excluir"
-                                        }
-                                    }
-                                    div {
-                                        style: "font-size: 14px; color: #111827; margin-bottom: 6px;",
-                                        "{note.body}"
-                                    }
-                                    if !note.tags.is_empty() {
-                                        div {
-                                            style: "display: flex; gap: 6px; flex-wrap: wrap;",
-                                            for t in note.tags.iter() {
-                                                {
-                                                    let tag_owned = t.clone();
-                                                    rsx! {
-                                                        button {
-                                                            style: "padding: 2px 8px; background: #dbeafe; color: #1e40af; border: none; border-radius: 10px; font-size: 11px;",
-                                                            onclick: move |_| {
-                                                                active_tag_filter.set(Some(tag_owned.clone()));
-                                                                refresh_timeline(selected_day_offset(), Some(tag_owned.clone()));
-                                                            },
-                                                            "#{t}"
-                                                        }
+                                                if day.is_today {
+                                                    classes.push_str(" is-today");
+                                                }
+                                                rsx! {
+                                                    button {
+                                                        key: "{idx}",
+                                                        class: "{classes}",
+                                                        onclick: move |_| {
+                                                            selected_day_offset.set(day_offset);
+                                                            refresh_timeline(day_offset, active_tag_filter.read().clone());
+                                                        },
+                                                        "{day.day_num}"
                                                     }
                                                 }
                                             }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // TAB 2: HÁBITOS & ALARMES
-            if active_tab() == ActiveTab::Habits {
-                div {
-                    if permission_blocked_n3() {
-                        div {
-                            style: "background: #fee2e2; border: 1px solid #ef4444; padding: 10px; border-radius: 6px; margin-bottom: 12px;",
-                            p {
-                                style: "margin: 0 0 8px 0; font-size: 13px; color: #991b1b;",
-                                "Não é possível criar ou ativar um hábito Nível 3 enquanto houver permissões críticas pendentes."
-                            }
-                            button {
-                                style: "padding: 8px 12px; background: #dc2626; color: white; border: none; border-radius: 4px; font-weight: bold; font-size: 12px;",
-                                onclick: move |_| {
-                                    health_state.set(check_native_permissions());
-                                    active_tab.set(ActiveTab::Health);
-                                },
-                                "Abrir Onboarding de Permissões"
-                            }
-                        }
-                    }
-
-                    if let Some(blocked_id) = cooldown_blocked_id() {
-                        div {
-                            style: "background: #fef3c7; border: 1px solid #f59e0b; padding: 10px; border-radius: 6px; margin-bottom: 12px;",
-                            p { style: "margin: 0 0 8px 0; font-size: 13px;", "Este hábito Nível 3 está protegido contra desativação ou alívio imediato." }
-                            button {
-                                style: "padding: 8px 12px; background: #d97706; color: white; border: none; border-radius: 4px; font-weight: bold;",
-                                onclick: move |_| {
-                                    let db = resolve_db_path();
-                                    let now_ms = current_epoch_ms();
-                                    if let Ok(store) = CoreStore::open(db) {
-                                        match store.request_cooldown_unlock(&blocked_id, now_ms) {
-                                            Ok(unlock_at) => {
-                                                status_msg.set(format!("Pedido de desbloqueio registado! Liberado após 24h (epoch {unlock_at})."));
-                                                cooldown_blocked_id.set(None);
-                                                reload_all(None);
-                                            }
-                                            Err(err) => status_msg.set(format!("Erro ao solicitar desbloqueio: {err}")),
-                                        }
-                                    }
-                                },
-                                "Solicitar Desbloqueio (24h)"
-                            }
-                        }
-                    }
-
-                    // Form Card
-                    div {
-                        style: "border: 1px solid #e5e7eb; border-radius: 8px; padding: 14px; margin-bottom: 20px;",
-                        h2 {
-                            style: "margin-top: 0; font-size: 18px;",
-                            if editing_id().is_some() { "Editar Hábito" } else { "Novo Hábito" }
-                        }
-
-                        div {
-                            style: "margin-bottom: 10px;",
-                            label { style: "display: block; font-size: 13px; font-weight: bold;", "Título do Hábito" }
-                            input {
-                                style: "width: 100%; padding: 8px; box-sizing: border-box; margin-top: 4px;",
-                                r#type: "text",
-                                value: "{title}",
-                                oninput: move |evt| title.set(evt.value())
-                            }
-                        }
-
-                        div {
-                            style: "display: flex; gap: 12px; margin-bottom: 10px;",
-                            div {
-                                style: "flex: 1;",
-                                label { style: "display: block; font-size: 13px; font-weight: bold;", "Hora (0-23)" }
-                                input {
-                                    style: "width: 100%; padding: 8px; box-sizing: border-box; margin-top: 4px;",
-                                    r#type: "number",
-                                    min: "0",
-                                    max: "23",
-                                    value: "{hour}",
-                                    oninput: move |evt| {
-                                        if let Ok(v) = evt.value().parse::<u8>() {
-                                            hour.set(v.min(23));
-                                        }
-                                    }
-                                }
-                            }
-                            div {
-                                style: "flex: 1;",
-                                label { style: "display: block; font-size: 13px; font-weight: bold;", "Minuto (0-59)" }
-                                input {
-                                    style: "width: 100%; padding: 8px; box-sizing: border-box; margin-top: 4px;",
-                                    r#type: "number",
-                                    min: "0",
-                                    max: "59",
-                                    value: "{minute}",
-                                    oninput: move |evt| {
-                                        if let Ok(v) = evt.value().parse::<u8>() {
-                                            minute.set(v.min(59));
-                                        }
-                                    }
-                                }
-                            }
-                            div {
-                                style: "flex: 1;",
-                                label { style: "display: block; font-size: 13px; font-weight: bold;", "Janela (min)" }
-                                input {
-                                    style: "width: 100%; padding: 8px; box-sizing: border-box; margin-top: 4px;",
-                                    r#type: "number",
-                                    min: "1",
-                                    max: "240",
-                                    value: "{grace_window_minutes}",
-                                    oninput: move |evt| {
-                                        if let Ok(v) = evt.value().parse::<u16>() {
-                                            grace_window_minutes.set(v.clamp(1, 240));
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        div {
-                            style: "margin-bottom: 10px;",
-                            label { style: "display: block; font-size: 13px; font-weight: bold; margin-bottom: 4px;", "Dias da Semana (nenhum = Evento Único)" }
-                            div {
-                                style: "display: flex; gap: 6px; flex-wrap: wrap;",
-                                for (name, bit) in WEEKDAY_NAMES.iter().copied() {
-                                    button {
-                                        style: if (weekdays_mask() & bit) != 0 {
-                                            "padding: 6px 10px; background: #2563eb; color: white; border: none; border-radius: 4px; font-size: 12px;"
                                         } else {
-                                            "padding: 6px 10px; background: #e5e7eb; color: #374151; border: none; border-radius: 4px; font-size: 12px;"
-                                        },
-                                        onclick: move |_| weekdays_mask.set(weekdays_mask() ^ bit),
-                                        "{name}"
+                                            span { key: "{idx}", class: "cal-month-cell is-empty" }
+                                        }
                                     }
                                 }
                             }
                         }
 
+                        // Quick Note Input
                         div {
-                            style: "margin-bottom: 10px;",
-                            label { style: "display: block; font-size: 13px; font-weight: bold; margin-bottom: 4px;", "Nível de Atrito" }
+                            class: "surface-pad",
+                            style: "padding: 12px;",
                             div {
                                 style: "display: flex; gap: 8px;",
-                                for (lvl, label_txt) in [
-                                    (AlarmLevel::Passive, "N1 Passivo"),
-                                    (AlarmLevel::Persistent, "N2 Persistente"),
-                                    (AlarmLevel::ProofOfAction, "N3 Prova IA"),
-                                ] {
-                                    button {
-                                        style: if level() == lvl {
-                                            "flex: 1; padding: 8px; background: #d81b60; color: white; border: none; border-radius: 4px; font-weight: bold;"
-                                        } else {
-                                            "flex: 1; padding: 8px; background: #e5e7eb; color: #374151; border: none; border-radius: 4px;"
-                                        },
-                                        onclick: move |_| level.set(lvl),
-                                        "{label_txt}"
-                                    }
+                                input {
+                                    class: "field-input",
+                                    style: "flex: 1;",
+                                    r#type: "text",
+                                    placeholder: "Adicionar nota rápida com #tags...",
+                                    value: "{note_draft}",
+                                    oninput: move |evt| note_draft.set(evt.value())
                                 }
-                            }
-                        }
-
-                        if level() == AlarmLevel::ProofOfAction {
-                            div {
-                                style: "margin-bottom: 12px;",
-                                label { style: "display: block; font-size: 13px; font-weight: bold; margin-bottom: 4px;", "Objeto de Prova (Catálogo ML Kit)" }
-                                div {
-                                    style: "display: flex; gap: 6px; flex-wrap: wrap;",
-                                    for (code, friendly) in CURATED_OBJECT_LABELS.iter().copied() {
-                                        button {
-                                            style: if target_label() == code {
-                                                "padding: 6px 10px; background: #008577; color: white; border: none; border-radius: 4px; font-size: 12px;"
-                                            } else {
-                                                "padding: 6px 10px; background: #e5e7eb; color: #374151; border: none; border-radius: 4px; font-size: 12px;"
-                                            },
-                                            onclick: move |_| target_label.set(code.to_string()),
-                                            "{friendly} ({code})"
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        div {
-                            style: "display: flex; gap: 10px;",
-                            button {
-                                style: "flex: 1; padding: 10px; background: #111827; color: white; border: none; border-radius: 6px; font-weight: bold;",
-                                onclick: save_alarm,
-                                if editing_id().is_some() { "Atualizar Hábito" } else { "Criar Hábito" }
-                            }
-                            if editing_id().is_some() {
                                 button {
-                                    style: "padding: 10px 14px; background: #9ca3af; color: white; border: none; border-radius: 6px;",
-                                    onclick: move |_| reset_form(),
-                                    "Cancelar"
+                                    class: "btn-primary",
+                                    style: "white-space: nowrap;",
+                                    onclick: save_quick_note,
+                                    "Guardar"
                                 }
                             }
                         }
-                    }
 
-                    // Alarms list
-                    h2 { style: "font-size: 18px; margin-bottom: 10px;", "Hábitos Registados" }
-                    if alarms().is_empty() {
-                        p { style: "color: #6b7280; font-size: 14px;", "Nenhum hábito configurado ainda." }
-                    }
-                    for item in alarms() {
-                        {
-                            let id_for_toggle = item.id.clone();
-                            let item_level = item.level;
-                            let next_enabled = !item.enabled;
-                            let item_for_edit = item.clone();
-                            let id_for_delete = item.id.clone();
-                            let id_for_test = item.id.clone();
-                            let id_for_outcomes = item.id.clone();
-                            let days_str = format_weekdays(item.weekdays_mask);
-
-                            rsx! {
-                                div {
-                                    key: "{item.id}",
-                                    style: "border: 1px solid #d1d5db; border-radius: 8px; padding: 12px; margin-bottom: 10px;",
-                                    div {
-                                        style: "display: flex; justify-content: space-between; align-items: center;",
-                                        div {
-                                            strong { style: "font-size: 16px;", "{item.hour:02}:{item.minute:02} — {item.title}" }
-                                            div {
-                                                style: "font-size: 12px; color: #4b5563; margin-top: 4px;",
-                                                "Nível {item.level.as_i32()} | {days_str} | Janela: {item.grace_window_minutes}m"
-                                                if item.level == AlarmLevel::ProofOfAction {
-                                                    " | Prova: {item.target_label}"
-                                                }
-                                            }
-                                            if let Some(unlock_ts) = item.cooldown_unlock_at_epoch_ms {
-                                                div {
-                                                    style: "font-size: 11px; color: #b45309; margin-top: 2px;",
-                                                    "Desbloqueio N3 agendado para: {unlock_ts}"
-                                                }
-                                            }
-                                        }
-                                        span {
-                                            style: if item.enabled {
-                                                "font-size: 12px; padding: 4px 8px; background: #d1fae5; color: #065f46; border-radius: 4px;"
-                                            } else {
-                                                "font-size: 12px; padding: 4px 8px; background: #f3f4f6; color: #6b7280; border-radius: 4px;"
-                                            },
-                                            if item.enabled { "Ativo" } else { "Inativo" }
-                                        }
-                                    }
-
-                                    div {
-                                        style: "display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px;",
-                                        button {
-                                            style: "padding: 6px 10px; background: #374151; color: white; border: none; border-radius: 4px; font-size: 12px;",
-                                            onclick: move |_| {
-                                                // R1: Only block when activating an N3 habit without permissions
-                                                if next_enabled && item_level == AlarmLevel::ProofOfAction {
-                                                    let h = check_native_permissions();
-                                                    health_state.set(h.clone());
-                                                    if !h.all_granted() {
-                                                        permission_blocked_n3.set(true);
-                                                        status_msg.set(format!(
-                                                            "Permissões pendentes para ativar Nível 3: {}.",
-                                                            h.missing_labels().join(", ")
-                                                        ));
-                                                        return;
-                                                    }
-                                                }
-                                                let db = resolve_db_path();
-                                                let now_ms = current_epoch_ms();
-                                                if let Ok(store) = CoreStore::open(db) {
-                                                    match store.set_alarm_enabled(&id_for_toggle, next_enabled, now_ms) {
-                                                        Ok(updated) => {
-                                                            let _ = if updated.enabled {
-                                                                schedule_native_alarm(&updated.id, updated.trigger_at_epoch_ms)
-                                                            } else {
-                                                                cancel_native_alarm(&updated.id)
-                                                            };
-                                                            status_msg.set(format!("Estado de '{}' alterado.", updated.title));
-                                                            reload_all(Some(updated.id));
-                                                        }
-                                                        Err(CoreError::CooldownActive { unlock_at_epoch_ms }) => {
-                                                            cooldown_blocked_id.set(Some(id_for_toggle.clone()));
-                                                            status_msg.set(format!("Cooldown N3 ativo até {unlock_at_epoch_ms}"));
-                                                        }
-                                                        Err(err) => status_msg.set(format!("Erro: {err}")),
-                                                    }
-                                                }
-                                            },
-                                            if item.enabled { "Desativar" } else { "Ativar" }
-                                        }
-
-                                        button {
-                                            style: "padding: 6px 10px; background: #2563eb; color: white; border: none; border-radius: 4px; font-size: 12px;",
-                                            onclick: move |_| {
-                                                editing_id.set(Some(item_for_edit.id.clone()));
-                                                title.set(item_for_edit.title.clone());
-                                                hour.set(item_for_edit.hour);
-                                                minute.set(item_for_edit.minute);
-                                                weekdays_mask.set(item_for_edit.weekdays_mask);
-                                                level.set(item_for_edit.level);
-                                                if !item_for_edit.target_label.is_empty() {
-                                                    target_label.set(item_for_edit.target_label.clone());
-                                                }
-                                                grace_window_minutes.set(item_for_edit.grace_window_minutes);
-                                                enabled.set(item_for_edit.enabled);
-                                            },
-                                            "Editar"
-                                        }
-
-                                        button {
-                                            style: "padding: 6px 10px; background: #dc2626; color: white; border: none; border-radius: 4px; font-size: 12px;",
-                                            onclick: move |_| {
-                                                let db = resolve_db_path();
-                                                let now_ms = current_epoch_ms();
-                                                if let Ok(store) = CoreStore::open(db) {
-                                                    match store.delete_alarm(&id_for_delete, now_ms) {
-                                                        Ok(()) => {
-                                                            let _ = cancel_native_alarm(&id_for_delete);
-                                                            status_msg.set(String::from("Hábito excluído."));
-                                                            reload_all(None);
-                                                        }
-                                                        Err(CoreError::CooldownActive { unlock_at_epoch_ms }) => {
-                                                            cooldown_blocked_id.set(Some(id_for_delete.clone()));
-                                                            status_msg.set(format!("Cooldown N3 ativo até {unlock_at_epoch_ms}"));
-                                                        }
-                                                        Err(err) => status_msg.set(format!("Erro ao excluir: {err}")),
-                                                    }
-                                                }
-                                            },
-                                            "Excluir"
-                                        }
-
-                                        button {
-                                            style: "padding: 6px 10px; background: #d81b60; color: white; border: none; border-radius: 4px; font-size: 12px;",
-                                            onclick: move |_| {
-                                                let test_trigger = current_epoch_ms() + 10_000;
-                                                match schedule_native_alarm(&id_for_test, test_trigger) {
-                                                    Ok(()) => status_msg.set(format!("Disparo de teste agendado para +10s ({id_for_test}). Bloqueie o ecrã!")),
-                                                    Err(err) => status_msg.set(format!("Falha JNI ao agendar teste: {err}")),
-                                                }
-                                            },
-                                            "Testar +10s"
-                                        }
-
-                                        button {
-                                            style: "padding: 6px 10px; background: #008577; color: white; border: none; border-radius: 4px; font-size: 12px;",
-                                            onclick: move |_| reload_all(Some(id_for_outcomes.clone())),
-                                            "Ver Histórico"
-                                        }
-                                    }
+                        // Active #tag filter
+                        if let Some(tag) = active_tag_filter() {
+                            div {
+                                style: "display: flex; justify-content: space-between; align-items: center; background: #F2F4F7; border: 1px solid #D0D5DD; padding: 8px 12px; border-radius: 8px; margin-bottom: 12px;",
+                                span {
+                                    style: "font-size: 12px; color: #344054;",
+                                    "Filtrado por "
+                                    strong { "#{tag}" }
+                                }
+                                button {
+                                    class: "btn-secondary",
+                                    style: "padding: 3px 8px; font-size: 11px;",
+                                    onclick: move |_| {
+                                        active_tag_filter.set(None);
+                                        refresh_timeline(selected_day_offset(), None);
+                                    },
+                                    "Limpar"
                                 }
                             }
                         }
-                    }
 
-                    if let Some(sel_id) = selected_alarm_id() {
+                        // Scheduled Habits
                         div {
-                            style: "margin-top: 20px; border-top: 1px solid #e5e7eb; padding-top: 12px;",
-                            h3 { style: "font-size: 16px;", "Histórico de Resultados ({sel_id})" }
-                            if outcomes().is_empty() {
-                                p { style: "font-size: 13px; color: #6b7280;", "Sem registos para este hábito." }
+                            class: "section-head",
+                            h2 { class: "section-title", "Agenda do dia" }
+                            span { class: "section-meta", "{snap.scheduled_alarms.len()}" }
+                        }
+                        div {
+                            class: "surface-group",
+                            if snap.scheduled_alarms.is_empty() {
+                                div {
+                                    style: "padding: 20px; text-align: center; color: #667085; font-size: 13px;",
+                                    "Nenhum hábito agendado para esta data."
+                                }
                             }
-                            ul {
-                                for out in outcomes() {
-                                    li {
-                                        key: "{out.id}",
-                                        style: "font-size: 13px; margin-bottom: 6px;",
+                            for item in snap.scheduled_alarms.iter() {
+                                {
+                                    let id_for_test = item.id.clone();
+                                    let level_label = match item.level {
+                                        AlarmLevel::Passive => "Nível 1",
+                                        AlarmLevel::Persistent => "Nível 2",
+                                        AlarmLevel::ProofOfAction => "Nível 3",
+                                    };
+                                    rsx! {
                                         div {
-                                            "#{out.id} [{out.outcome}] @ {format_local_time_hms(out.recorded_at_epoch_ms)}"
+                                            key: "sched-{item.id}",
+                                            class: "list-row",
+                                            div {
+                                                style: "display: flex; align-items: center; gap: 14px; min-width: 0;",
+                                                div {
+                                                    class: "time-display",
+                                                    "{item.hour:02}:{item.minute:02}"
+                                                }
+                                                div {
+                                                    style: "min-width: 0;",
+                                                    div {
+                                                        style: "font-size: 15px; font-weight: 500; color: #101828; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;",
+                                                        "{item.title}"
+                                                    }
+                                                    div {
+                                                        style: "font-size: 12px; color: #667085; margin-top: 2px;",
+                                                        "{level_label} · Janela {item.grace_window_minutes} min"
+                                                        if item.level == AlarmLevel::ProofOfAction {
+                                                            " · Objeto: {item.target_label}"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            button {
+                                                class: "btn-secondary",
+                                                style: "flex-shrink: 0;",
+                                                onclick: move |_| {
+                                                    let test_trigger = current_epoch_ms() + 10_000;
+                                                    match schedule_native_alarm(&id_for_test, test_trigger) {
+                                                        Ok(()) => status_msg.set(format!("Alarme agendado para daqui a 10s.")),
+                                                        Err(err) => status_msg.set(format!("Falha JNI: {err}")),
+                                                    }
+                                                },
+                                                "Testar +10s"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Recorded Outcomes
+                        div {
+                            class: "section-head",
+                            h2 { class: "section-title", "Execuções registadas" }
+                            span { class: "section-meta", "{snap.outcomes.len()}" }
+                        }
+                        div {
+                            class: "surface-group",
+                            if snap.outcomes.is_empty() {
+                                div {
+                                    style: "padding: 20px; text-align: center; color: #667085; font-size: 13px;",
+                                    "Sem execuções registadas nesta data."
+                                }
+                            }
+                            for out in snap.outcomes.iter() {
+                                {
+                                    let time_str = format_local_time_hms(out.recorded_at_epoch_ms);
+                                    let (badge_bg, badge_fg, label_txt) = match out.outcome.as_str() {
+                                        "CUMPRIDO" => ("#ECFDF3", "#027A48", "Cumprido"),
+                                        "FALHOU" => ("#FEF3F2", "#B42318", "Falhou"),
+                                        "ADIADO" => ("#FFFAEB", "#B54708", "Adiado"),
+                                        _ => ("#F2F4F7", "#344054", out.outcome.as_str()),
+                                    };
+                                    rsx! {
+                                        div {
+                                            key: "tl-out-{out.id}",
+                                            class: "list-row",
+                                            style: "flex-direction: column; align-items: stretch; gap: 4px;",
+                                            div {
+                                                style: "display: flex; justify-content: space-between; align-items: center;",
+                                                div {
+                                                    style: "display: flex; align-items: baseline; gap: 8px;",
+                                                    span {
+                                                        style: "font-size: 12px; color: #667085; font-variant-numeric: tabular-nums;",
+                                                        "{time_str}"
+                                                    }
+                                                    span {
+                                                        style: "font-size: 14px; font-weight: 500; color: #101828;",
+                                                        "{out.alarm_title}"
+                                                    }
+                                                }
+                                                span {
+                                                    style: "padding: 2px 8px; background: {badge_bg}; color: {badge_fg}; border-radius: 999px; font-size: 11px; font-weight: 500;",
+                                                    "{label_txt}"
+                                                }
+                                            }
                                             if let Some(lbl) = &out.matched_label {
-                                                if let Some(conf) = out.confidence {
-                                                    " — ML Kit: {lbl} ({conf * 100.0:.0}%)"
-                                                } else {
-                                                    " — ML Kit: {lbl}"
+                                                div {
+                                                    style: "font-size: 12px; color: #475467;",
+                                                    if let Some(conf) = out.confidence {
+                                                        "Objeto validado: {lbl} ({conf * 100.0:.0}%)"
+                                                    } else {
+                                                        "Objeto validado: {lbl}"
+                                                    }
+                                                }
+                                            }
+                                            if let Some(path) = &out.proof_image_path {
+                                                div {
+                                                    style: "font-size: 11px; color: #667085; word-break: break-all;",
+                                                    "Ficheiro: {path}"
                                                 }
                                             }
                                         }
-                                        if let Some(path) = &out.proof_image_path {
+                                    }
+                                }
+                            }
+                        }
+
+                        // Quick Notes
+                        div {
+                            class: "section-head",
+                            h2 { class: "section-title", "Notas" }
+                            span { class: "section-meta", "{snap.notes.len()}" }
+                        }
+                        div {
+                            class: "surface-group",
+                            if snap.notes.is_empty() {
+                                div {
+                                    style: "padding: 20px; text-align: center; color: #667085; font-size: 13px;",
+                                    "Sem notas registadas nesta data."
+                                }
+                            }
+                            for note in snap.notes.iter() {
+                                {
+                                    let note_id = note.id.clone();
+                                    let time_str = format_local_time_hm(note.created_at_epoch_ms);
+                                    rsx! {
+                                        div {
+                                            key: "note-{note.id}",
+                                            class: "list-row",
+                                            style: "flex-direction: column; align-items: stretch; gap: 6px;",
                                             div {
-                                                style: "font-size: 11px; color: #047857;",
-                                                "📷 Prova gravada: {path}"
+                                                style: "display: flex; justify-content: space-between; align-items: center;",
+                                                span {
+                                                    style: "font-size: 12px; color: #667085; font-variant-numeric: tabular-nums;",
+                                                    "{time_str}"
+                                                }
+                                                button {
+                                                    style: "background: transparent; border: none; color: #667085; font-size: 12px; padding: 0;",
+                                                    onclick: move |_| {
+                                                        let db = resolve_db_path();
+                                                        let now_ms = current_epoch_ms();
+                                                        if let Ok(store) = CoreStore::open(db) {
+                                                            if store.delete_note(&note_id, now_ms).is_ok() {
+                                                                status_msg.set(String::from("Nota removida."));
+                                                                refresh_timeline(selected_day_offset(), active_tag_filter.read().clone());
+                                                            }
+                                                        }
+                                                    },
+                                                    "Remover"
+                                                }
+                                            }
+                                            div {
+                                                style: "font-size: 14px; color: #101828; line-height: 1.45;",
+                                                "{note.body}"
+                                            }
+                                            if !note.tags.is_empty() {
+                                                div {
+                                                    style: "display: flex; gap: 6px; flex-wrap: wrap;",
+                                                    for t in note.tags.iter() {
+                                                        {
+                                                            let tag_owned = t.clone();
+                                                            rsx! {
+                                                                button {
+                                                                    style: "padding: 2px 8px; background: #F2F4F7; color: #344054; border: 1px solid #E4E7EC; border-radius: 999px; font-size: 11px; font-weight: 500;",
+                                                                    onclick: move |_| {
+                                                                        active_tag_filter.set(Some(tag_owned.clone()));
+                                                                        refresh_timeline(selected_day_offset(), Some(tag_owned.clone()));
+                                                                    },
+                                                                    "#{t}"
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -1064,119 +1311,583 @@ fn App() -> Element {
                         }
                     }
                 }
-            }
 
-            // TAB 3: SAÚDE & ONBOARDING DE PERMISSÕES
-            if active_tab() == ActiveTab::Health {
-                div {
+                // TAB 2: HÁBITOS & ALARMES
+                if active_tab() == ActiveTab::Habits {
                     div {
-                        style: if current_health.all_granted() {
-                            "background: #ecfdf5; border: 1px solid #10b981; padding: 12px; border-radius: 8px; margin-bottom: 16px;"
-                        } else {
-                            "background: #fef2f2; border: 1px solid #ef4444; padding: 12px; border-radius: 8px; margin-bottom: 16px;"
-                        },
-                        div {
-                            style: "display: flex; justify-content: space-between; align-items: center;",
+                        if permission_blocked_n3() {
                             div {
-                                strong {
-                                    style: "font-size: 15px;",
-                                    if current_health.all_granted() {
-                                        "Sistema 100% Pronto ({granted_count}/6 Permissões Ativas)"
-                                    } else {
-                                        "Onboarding de Permissões ({granted_count}/6 Ativas)"
+                                style: "background: #FEF3F2; border: 1px solid #FECDCA; padding: 12px; border-radius: 10px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; gap: 10px;",
+                                span {
+                                    style: "font-size: 12px; color: #B42318;",
+                                    "Conceda as 6 permissões antes de ativar um hábito Nível 3."
+                                }
+                                button {
+                                    class: "btn-secondary",
+                                    onclick: move |_| {
+                                        health_state.set(check_native_permissions());
+                                        active_tab.set(ActiveTab::Health);
+                                    },
+                                    "Permissões"
+                                }
+                            }
+                        }
+
+                        if let Some(blocked_id) = cooldown_blocked_id() {
+                            div {
+                                style: "background: #FFFAEB; border: 1px solid #FEDF89; padding: 12px; border-radius: 10px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; gap: 10px;",
+                                span {
+                                    style: "font-size: 12px; color: #93370D;",
+                                    "Hábito Nível 3 protegido por bloqueio de 24 horas."
+                                }
+                                button {
+                                    class: "btn-secondary",
+                                    onclick: move |_| {
+                                        let db = resolve_db_path();
+                                        let now_ms = current_epoch_ms();
+                                        if let Ok(store) = CoreStore::open(db) {
+                                            match store.request_cooldown_unlock(&blocked_id, now_ms) {
+                                                Ok(unlock_at) => {
+                                                    status_msg.set(format!("Desbloqueio agendado para daqui a 24h ({unlock_at})."));
+                                                    cooldown_blocked_id.set(None);
+                                                    reload_all(None);
+                                                }
+                                                Err(err) => status_msg.set(format!("Erro: {err}")),
+                                            }
+                                        }
+                                    },
+                                    "Solicitar desbloqueio (24h)"
+                                }
+                            }
+                        }
+
+                        // Habit Editor Card
+                        div {
+                            class: "surface-pad",
+                            h2 {
+                                style: "margin: 0 0 12px 0; font-size: 15px; font-weight: 600; color: #101828;",
+                                if editing_id().is_some() { "Editar hábito" } else { "Novo hábito" }
+                            }
+
+                            div {
+                                style: "margin-bottom: 12px;",
+                                label { style: "display: block; font-size: 12px; font-weight: 500; color: #344054; margin-bottom: 4px;", "Nome" }
+                                input {
+                                    class: "field-input",
+                                    r#type: "text",
+                                    value: "{title}",
+                                    oninput: move |evt| title.set(evt.value())
+                                }
+                            }
+
+                            div {
+                                style: "display: flex; gap: 10px; margin-bottom: 12px;",
+                                div {
+                                    style: "flex: 1;",
+                                    label { style: "display: block; font-size: 12px; font-weight: 500; color: #344054; margin-bottom: 4px;", "Hora" }
+                                    input {
+                                        class: "field-input",
+                                        r#type: "number",
+                                        min: "0",
+                                        max: "23",
+                                        value: "{hour}",
+                                        oninput: move |evt| {
+                                            if let Ok(v) = evt.value().parse::<u8>() {
+                                                hour.set(v.min(23));
+                                            }
+                                        }
                                     }
                                 }
+                                div {
+                                    style: "flex: 1;",
+                                    label { style: "display: block; font-size: 12px; font-weight: 500; color: #344054; margin-bottom: 4px;", "Minuto" }
+                                    input {
+                                        class: "field-input",
+                                        r#type: "number",
+                                        min: "0",
+                                        max: "59",
+                                        value: "{minute}",
+                                        oninput: move |evt| {
+                                            if let Ok(v) = evt.value().parse::<u8>() {
+                                                minute.set(v.min(59));
+                                            }
+                                        }
+                                    }
+                                }
+                                div {
+                                    style: "flex: 1;",
+                                    label { style: "display: block; font-size: 12px; font-weight: 500; color: #344054; margin-bottom: 4px;", "Janela (min)" }
+                                    input {
+                                        class: "field-input",
+                                        r#type: "number",
+                                        min: "1",
+                                        max: "240",
+                                        value: "{grace_window_minutes}",
+                                        oninput: move |evt| {
+                                            if let Ok(v) = evt.value().parse::<u16>() {
+                                                grace_window_minutes.set(v.clamp(1, 240));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            div {
+                                style: "margin-bottom: 12px;",
+                                label { style: "display: block; font-size: 12px; font-weight: 500; color: #344054; margin-bottom: 6px;", "Dias da semana" }
+                                div {
+                                    style: "display: flex; gap: 6px; flex-wrap: wrap;",
+                                    for (name, bit) in WEEKDAY_NAMES.iter().copied() {
+                                        button {
+                                            style: if (weekdays_mask() & bit) != 0 {
+                                                "padding: 6px 10px; background: #101828; color: #FFFFFF; border: 1px solid #101828; border-radius: 6px; font-size: 12px; font-weight: 500;"
+                                            } else {
+                                                "padding: 6px 10px; background: #FFFFFF; color: #475467; border: 1px solid #D0D5DD; border-radius: 6px; font-size: 12px; font-weight: 500;"
+                                            },
+                                            onclick: move |_| weekdays_mask.set(weekdays_mask() ^ bit),
+                                            "{name}"
+                                        }
+                                    }
+                                }
+                            }
+
+                            div {
+                                style: "margin-bottom: 12px;",
+                                label { style: "display: block; font-size: 12px; font-weight: 500; color: #344054; margin-bottom: 6px;", "Nível de exigência" }
+                                div {
+                                    style: "display: flex; gap: 6px;",
+                                    for (lvl, label_txt) in [
+                                        (AlarmLevel::Passive, "Nível 1 · Leve"),
+                                        (AlarmLevel::Persistent, "Nível 2 · Médio"),
+                                        (AlarmLevel::ProofOfAction, "Nível 3 · Câmara"),
+                                    ] {
+                                        button {
+                                            style: if level() == lvl {
+                                                "flex: 1; padding: 8px 6px; background: #101828; color: #FFFFFF; border: 1px solid #101828; border-radius: 7px; font-weight: 500; font-size: 12px;"
+                                            } else {
+                                                "flex: 1; padding: 8px 6px; background: #FFFFFF; color: #475467; border: 1px solid #D0D5DD; border-radius: 7px; font-weight: 500; font-size: 12px;"
+                                            },
+                                            onclick: move |_| level.set(lvl),
+                                            "{label_txt}"
+                                        }
+                                    }
+                                }
+                            }
+
+                            if level() == AlarmLevel::ProofOfAction {
+                                div {
+                                    style: "margin-bottom: 14px; background: #F9FAFB; border: 1px solid #EAECF0; padding: 10px; border-radius: 8px;",
+                                    label { style: "display: block; font-size: 12px; font-weight: 500; color: #344054; margin-bottom: 6px;", "Objeto para validação visual" }
+                                    div {
+                                        style: "display: flex; gap: 6px; flex-wrap: wrap;",
+                                        for (code, friendly) in CURATED_OBJECT_LABELS.iter().copied() {
+                                            button {
+                                                style: if target_label() == code {
+                                                    "padding: 5px 10px; background: #101828; color: #FFFFFF; border: 1px solid #101828; border-radius: 6px; font-size: 12px; font-weight: 500;"
+                                                } else {
+                                                    "padding: 5px 10px; background: #FFFFFF; color: #344054; border: 1px solid #D0D5DD; border-radius: 6px; font-size: 12px; font-weight: 500;"
+                                                },
+                                                onclick: move |_| target_label.set(code.to_string()),
+                                                "{friendly}"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            div {
+                                style: "display: flex; gap: 8px;",
+                                button {
+                                    class: "btn-primary",
+                                    style: "flex: 1;",
+                                    onclick: save_alarm,
+                                    if editing_id().is_some() { "Guardar alterações" } else { "Adicionar hábito" }
+                                }
+                                if editing_id().is_some() {
+                                    button {
+                                        class: "btn-secondary",
+                                        onclick: move |_| reset_form(),
+                                        "Cancelar"
+                                    }
+                                }
+                            }
+                        }
+
+                        // Habits List
+                        div {
+                            class: "section-head",
+                            h2 { class: "section-title", "Todos os hábitos" }
+                            span { class: "section-meta", "{alarms().len()}" }
+                        }
+                        div {
+                            class: "surface-group",
+                            if alarms().is_empty() {
+                                div {
+                                    style: "padding: 20px; text-align: center; color: #667085; font-size: 13px;",
+                                    "Nenhum hábito configurado."
+                                }
+                            }
+                            for item in alarms() {
+                                {
+                                    let id_for_toggle = item.id.clone();
+                                    let item_level = item.level;
+                                    let next_enabled = !item.enabled;
+                                    let item_for_edit = item.clone();
+                                    let id_for_delete = item.id.clone();
+                                    let id_for_test = item.id.clone();
+                                    let id_for_outcomes = item.id.clone();
+                                    let days_str = format_weekdays(item.weekdays_mask);
+
+                                    rsx! {
+                                        div {
+                                            key: "{item.id}",
+                                            class: "list-row",
+                                            style: "flex-direction: column; align-items: stretch; gap: 10px;",
+                                            div {
+                                                style: "display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;",
+                                                div {
+                                                    style: "display: flex; align-items: center; gap: 12px;",
+                                                    div {
+                                                        class: "time-display",
+                                                        style: if item.enabled { "" } else { "color: #98A2B3;" },
+                                                        "{item.hour:02}:{item.minute:02}"
+                                                    }
+                                                    div {
+                                                        div {
+                                                            style: "font-size: 15px; font-weight: 500; color: #101828;",
+                                                            "{item.title}"
+                                                        }
+                                                        div {
+                                                            style: "font-size: 12px; color: #667085; margin-top: 2px;",
+                                                            "Nível {item.level.as_i32()} · {days_str} · {item.grace_window_minutes} min"
+                                                            if item.level == AlarmLevel::ProofOfAction {
+                                                                " · {item.target_label}"
+                                                            }
+                                                        }
+                                                        if let Some(unlock_ts) = item.cooldown_unlock_at_epoch_ms {
+                                                            div {
+                                                                style: "font-size: 11px; color: #B54708; margin-top: 2px;",
+                                                                "Desbloqueio agendado: {unlock_ts}"
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                span {
+                                                    style: if item.enabled {
+                                                        "font-size: 11px; padding: 2px 8px; background: #ECFDF3; color: #027A48; border-radius: 999px; font-weight: 500;"
+                                                    } else {
+                                                        "font-size: 11px; padding: 2px 8px; background: #F2F4F7; color: #667085; border-radius: 999px; font-weight: 500;"
+                                                    },
+                                                    if item.enabled { "Ativo" } else { "Pausado" }
+                                                }
+                                            }
+
+                                            div {
+                                                style: "display: flex; gap: 6px; flex-wrap: wrap;",
+                                                button {
+                                                    class: "btn-secondary",
+                                                    onclick: move |_| {
+                                                        if next_enabled && item_level == AlarmLevel::ProofOfAction {
+                                                            let h = check_native_permissions();
+                                                            health_state.set(h.clone());
+                                                            if !h.all_granted() {
+                                                                permission_blocked_n3.set(true);
+                                                                status_msg.set(format!(
+                                                                    "Permissões pendentes para Nível 3: {}.",
+                                                                    h.missing_labels().join(", ")
+                                                                ));
+                                                                return;
+                                                            }
+                                                        }
+                                                        let db = resolve_db_path();
+                                                        let now_ms = current_epoch_ms();
+                                                        if let Ok(store) = CoreStore::open(db) {
+                                                            match store.set_alarm_enabled(&id_for_toggle, next_enabled, now_ms) {
+                                                                Ok(updated) => {
+                                                                    let _ = if updated.enabled {
+                                                                        schedule_native_alarm(&updated.id, updated.trigger_at_epoch_ms)
+                                                                    } else {
+                                                                        cancel_native_alarm(&updated.id)
+                                                                    };
+                                                                    status_msg.set(format!("Estado de '{}' atualizado.", updated.title));
+                                                                    reload_all(Some(updated.id));
+                                                                }
+                                                                Err(CoreError::CooldownActive { unlock_at_epoch_ms }) => {
+                                                                    cooldown_blocked_id.set(Some(id_for_toggle.clone()));
+                                                                    status_msg.set(format!("Bloqueio 24h ativo até {unlock_at_epoch_ms}"));
+                                                                }
+                                                                Err(err) => status_msg.set(format!("Erro: {err}")),
+                                                            }
+                                                        }
+                                                    },
+                                                    if item.enabled { "Pausar" } else { "Ativar" }
+                                                }
+
+                                                button {
+                                                    class: "btn-secondary",
+                                                    onclick: move |_| {
+                                                        editing_id.set(Some(item_for_edit.id.clone()));
+                                                        title.set(item_for_edit.title.clone());
+                                                        hour.set(item_for_edit.hour);
+                                                        minute.set(item_for_edit.minute);
+                                                        weekdays_mask.set(item_for_edit.weekdays_mask);
+                                                        level.set(item_for_edit.level);
+                                                        if !item_for_edit.target_label.is_empty() {
+                                                            target_label.set(item_for_edit.target_label.clone());
+                                                        }
+                                                        grace_window_minutes.set(item_for_edit.grace_window_minutes);
+                                                        enabled.set(item_for_edit.enabled);
+                                                    },
+                                                    "Editar"
+                                                }
+
+                                                button {
+                                                    class: "btn-secondary",
+                                                    onclick: move |_| {
+                                                        let test_trigger = current_epoch_ms() + 10_000;
+                                                        match schedule_native_alarm(&id_for_test, test_trigger) {
+                                                            Ok(()) => status_msg.set(format!("Teste agendado para +10s.")),
+                                                            Err(err) => status_msg.set(format!("Erro JNI: {err}")),
+                                                        }
+                                                    },
+                                                    "Testar +10s"
+                                                }
+
+                                                button {
+                                                    class: "btn-secondary",
+                                                    onclick: move |_| reload_all(Some(id_for_outcomes.clone())),
+                                                    "Histórico"
+                                                }
+
+                                                button {
+                                                    class: "btn-danger-ghost",
+                                                    onclick: move |_| {
+                                                        let db = resolve_db_path();
+                                                        let now_ms = current_epoch_ms();
+                                                        if let Ok(store) = CoreStore::open(db) {
+                                                            match store.delete_alarm(&id_for_delete, now_ms) {
+                                                                Ok(()) => {
+                                                                    let _ = cancel_native_alarm(&id_for_delete);
+                                                                    status_msg.set(String::from("Hábito removido."));
+                                                                    reload_all(None);
+                                                                }
+                                                                Err(CoreError::CooldownActive { unlock_at_epoch_ms }) => {
+                                                                    cooldown_blocked_id.set(Some(id_for_delete.clone()));
+                                                                    status_msg.set(format!("Bloqueio 24h ativo até {unlock_at_epoch_ms}"));
+                                                                }
+                                                                Err(err) => status_msg.set(format!("Erro: {err}")),
+                                                            }
+                                                        }
+                                                    },
+                                                    "Remover"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if let Some(sel_id) = selected_alarm_id() {
+                            div {
+                                class: "surface-pad",
+                                h3 { style: "margin: 0 0 8px 0; font-size: 14px; font-weight: 600;", "Histórico ({sel_id})" }
+                                if outcomes().is_empty() {
+                                    p { style: "font-size: 12px; color: #667085; margin: 0;", "Sem registos para este hábito." }
+                                }
+                                for out in outcomes() {
+                                    div {
+                                        key: "{out.id}",
+                                        style: "font-size: 12px; padding: 6px 0; border-bottom: 1px solid #F2F4F7; color: #344054;",
+                                        div {
+                                            "{format_local_time_hms(out.recorded_at_epoch_ms)} · {out.outcome}"
+                                            if let Some(lbl) = &out.matched_label {
+                                                if let Some(conf) = out.confidence {
+                                                    " · {lbl} ({conf * 100.0:.0}%)"
+                                                } else {
+                                                    " · {lbl}"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // TAB 3: PERMISSÕES DO SISTEMA
+                if active_tab() == ActiveTab::Health {
+                    div {
+                        div {
+                            class: "surface-pad",
+                            style: "display: flex; justify-content: space-between; align-items: center; gap: 12px;",
+                            div {
+                                div {
+                                    style: "font-size: 15px; font-weight: 600; color: #101828;",
+                                    "Permissões do Android ({granted_count}/6)"
+                                }
                                 p {
-                                    style: "margin: 4px 0 0 0; font-size: 12px; color: #374151;",
-                                    "Hábitos Nível 3 exigem todas as 6 permissões abaixo para garantir bloqueio duro e validação por câmara."
+                                    style: "margin: 3px 0 0 0; font-size: 12px; color: #667085; line-height: 1.4;",
+                                    "Necessárias para disparo exato, sobreposição de ecrã e validação por câmara."
                                 }
                             }
                             button {
-                                style: "padding: 8px 12px; background: #111827; color: white; border: none; border-radius: 6px; font-size: 12px; font-weight: bold;",
+                                class: "btn-secondary",
                                 onclick: move |_| {
                                     let refreshed = check_native_permissions();
                                     if refreshed.all_granted() {
                                         permission_blocked_n3.set(false);
                                     }
                                     health_state.set(refreshed);
-                                    status_msg.set(String::from("Estado das permissões revalidado."));
+                                    status_msg.set(String::from("Permissões atualizadas."));
                                 },
-                                "Revalidar Agora"
+                                "Atualizar"
                             }
                         }
-                    }
 
-                    for (key, name, desc, is_ok) in [
-                        (
-                            "exact_alarm",
-                            "1. Alarme Exato (SCHEDULE_EXACT_ALARM)",
-                            "Garante que o AlarmManager dispare no minuto exato mesmo em Doze mode.",
-                            current_health.exact_alarm,
-                        ),
-                        (
-                            "overlay",
-                            "2. Sobreposição de Ecrã (SYSTEM_ALERT_WINDOW)",
-                            "Permite abrir a LockActivity sobre outras janelas quando o alarme dispara.",
-                            current_health.overlay,
-                        ),
-                        (
-                            "accessibility",
-                            "3. Serviço de Acessibilidade CrabCheck",
-                            "Mantém o bloqueio Nível 3 ativo impedindo saída pelo botão Home ou Recentes.",
-                            current_health.accessibility,
-                        ),
-                        (
-                            "camera",
-                            "4. Câmara (Prova de Ação ML Kit)",
-                            "Necessária para validar o objeto exigido em tempo real com o ML Kit.",
-                            current_health.camera,
-                        ),
-                        (
-                            "notifications",
-                            "5. Notificações e Full-Screen Intent",
-                            "Exibe o serviço de áudio em primeiro plano e acorda o ecrã bloqueado.",
-                            current_health.notifications,
-                        ),
-                        (
-                            "battery",
-                            "6. Isenção de Otimização de Bateria",
-                            "Impede que o sistema suspenda o serviço sonoro ou o reagendamento.",
-                            current_health.battery,
-                        ),
-                    ] {
                         div {
-                            key: "perm-{key}",
-                            style: "border: 1px solid #d1d5db; border-radius: 8px; padding: 12px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; gap: 10px;",
-                            div {
-                                strong { style: "font-size: 14px;", "{name}" }
+                            class: "surface-group",
+                            for (key, name, desc, is_ok) in [
+                                (
+                                    "exact_alarm",
+                                    "Alarme exato",
+                                    "Dispara no minuto agendado mesmo com o ecrã em repouso.",
+                                    current_health.exact_alarm,
+                                ),
+                                (
+                                    "overlay",
+                                    "Sobrepor a outras aplicações",
+                                    "Permite abrir o ecrã de alarme sobre qualquer aplicação.",
+                                    current_health.overlay,
+                                ),
+                                (
+                                    "accessibility",
+                                    "Serviço de acessibilidade",
+                                    "Mantém o ecrã de validação focado durante alarmes Nível 3.",
+                                    current_health.accessibility,
+                                ),
+                                (
+                                    "camera",
+                                    "Câmara",
+                                    "Utilizada localmente para reconhecer o objeto do hábito.",
+                                    current_health.camera,
+                                ),
+                                (
+                                    "notifications",
+                                    "Notificações de ecrã inteiro",
+                                    "Mantém o serviço de som ativo e acorda o dispositivo.",
+                                    current_health.notifications,
+                                ),
+                                (
+                                    "battery",
+                                    "Sem restrição de bateria",
+                                    "Evita que o sistema interrompa o agendamento em segundo plano.",
+                                    current_health.battery,
+                                ),
+                            ] {
                                 div {
-                                    style: "font-size: 12px; color: #4b5563; margin-top: 3px;",
-                                    "{desc}"
-                                }
-                            }
-                            div {
-                                style: "display: flex; flex-direction: column; align-items: flex-end; gap: 6px;",
-                                span {
-                                    style: if is_ok {
-                                        "font-size: 11px; padding: 3px 8px; background: #d1fae5; color: #065f46; border-radius: 4px; font-weight: bold;"
-                                    } else {
-                                        "font-size: 11px; padding: 3px 8px; background: #fee2e2; color: #991b1b; border-radius: 4px; font-weight: bold;"
-                                    },
-                                    if is_ok { "Ativo" } else { "Pendente" }
-                                }
-                                button {
-                                    style: "padding: 6px 10px; background: #2563eb; color: white; border: none; border-radius: 4px; font-size: 12px; white-space: nowrap;",
-                                    onclick: move |_| {
-                                        match open_native_permission_setting(key) {
-                                            Ok(()) => status_msg.set(format!("A abrir configuração para '{name}'... Clique em Revalidar ao voltar.")),
-                                            Err(err) => status_msg.set(format!("Erro JNI ao abrir configuração: {err}")),
+                                    key: "perm-{key}",
+                                    class: "list-row",
+                                    div {
+                                        div {
+                                            style: "display: flex; align-items: center; gap: 8px;",
+                                            span {
+                                                class: if is_ok { "dot-ok" } else { "dot-warn" }
+                                            }
+                                            span {
+                                                style: "font-size: 14px; font-weight: 500; color: #101828;",
+                                                "{name}"
+                                            }
                                         }
-                                    },
-                                    if is_ok { "Rever" } else { "Configurar" }
+                                        div {
+                                            style: "font-size: 12px; color: #667085; margin-top: 2px; padding-left: 14px;",
+                                            "{desc}"
+                                        }
+                                    }
+                                    button {
+                                        class: if is_ok { "btn-secondary" } else { "btn-primary" },
+                                        style: "padding: 6px 11px; font-size: 12px; flex-shrink: 0;",
+                                        onclick: move |_| {
+                                            match open_native_permission_setting(key) {
+                                                Ok(()) => status_msg.set(format!("A abrir '{name}'...")),
+                                                Err(err) => status_msg.set(format!("Erro JNI: {err}")),
+                                            }
+                                        },
+                                        if is_ok { "Rever" } else { "Ativar" }
+                                    }
                                 }
                             }
                         }
                     }
+                }
+            }
+
+            // Fixed Bottom Navigation Bar
+            nav {
+                class: "bottom-nav",
+                button {
+                    class: if active_tab() == ActiveTab::Timeline { "nav-item nav-item-active" } else { "nav-item" },
+                    onclick: move |_| {
+                        active_tab.set(ActiveTab::Timeline);
+                        reload_all(None);
+                    },
+                    svg {
+                        width: "18",
+                        height: "18",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "1.8",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        rect { x: "3", y: "4", width: "18", height: "18", rx: "2", ry: "2" }
+                        line { x1: "16", y1: "2", x2: "16", y2: "6" }
+                        line { x1: "8", y1: "2", x2: "8", y2: "6" }
+                        line { x1: "3", y1: "10", x2: "21", y2: "10" }
+                    }
+                    span { "Hoje" }
+                }
+                button {
+                    class: if active_tab() == ActiveTab::Habits { "nav-item nav-item-active" } else { "nav-item" },
+                    onclick: move |_| {
+                        active_tab.set(ActiveTab::Habits);
+                        reload_all(None);
+                    },
+                    svg {
+                        width: "18",
+                        height: "18",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "1.8",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        circle { cx: "12", cy: "13", r: "8" }
+                        path { d: "M12 9v4l2 2" }
+                        path { d: "M5 3L2 6" }
+                        path { d: "M22 6l-3-3" }
+                    }
+                    span { "Hábitos" }
+                }
+                button {
+                    class: if active_tab() == ActiveTab::Health { "nav-item nav-item-active" } else { "nav-item" },
+                    onclick: move |_| {
+                        health_state.set(check_native_permissions());
+                        active_tab.set(ActiveTab::Health);
+                    },
+                    svg {
+                        width: "18",
+                        height: "18",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "1.8",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        path { d: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" }
+                    }
+                    span { "Sistema" }
                 }
             }
         }
@@ -1409,4 +2120,36 @@ fn check_native_permissions() -> PermissionHealthState {
 #[cfg(not(target_os = "android"))]
 fn open_native_permission_setting(_key: &str) -> Result<(), String> {
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_calendar_week_strip() {
+        // Fix a known epoch: 2026-10-23T12:00:00Z is a Friday
+        let fixed_epoch_ms = 1792756800000;
+        let (header, days) = calculate_week_strip(fixed_epoch_ms, 0);
+        assert!(!header.is_empty());
+        assert_eq!(days.len(), 7);
+        // At offset 0, exactly one day is today and selected
+        let today_count = days.iter().filter(|d| d.is_today).count();
+        let selected_count = days.iter().filter(|d| d.is_selected).count();
+        assert_eq!(today_count, 1);
+        assert_eq!(selected_count, 1);
+    }
+
+    #[test]
+    fn test_calendar_month_grid_and_offsets() {
+        let fixed_epoch_ms = 1792756800000;
+        let (header, cells) = calculate_month_grid(fixed_epoch_ms, 0);
+        assert!(header.contains("2026"));
+        assert!(!cells.is_empty());
+
+        let prev = prev_month_offset(fixed_epoch_ms, 0);
+        let next = next_month_offset(fixed_epoch_ms, 0);
+        assert!(prev < 0);
+        assert!(next > 0);
+    }
 }

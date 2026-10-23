@@ -1,6 +1,13 @@
-# CrabCheck
+<p align="center">
+  <img src="assets/crabcheck.png" alt="CrabCheck Logo" width="160" />
+</p>
 
-Agenda de Hábitos com Atrito Configurável e Prova de Ação, construída com **Rust (Dioxus + SQLite + UniFFI)** e **Kotlin (Android AlarmManager + LockActivity)**.
+<h1 align="center">CrabCheck</h1>
+
+<p align="center">
+  <strong>Agenda de Hábitos com Atrito Configurável e Prova de Ação Visual (Pacto de Ulisses)</strong><br />
+  Construída com <em>Rust (Dioxus + SQLite + UniFFI)</em> e <em>Kotlin (Android AlarmManager + CameraX + ML Kit)</em>
+</p>
 
 Consulte:
 - [contexto.md](contexto.md) — visão geral do produto e casos de uso.

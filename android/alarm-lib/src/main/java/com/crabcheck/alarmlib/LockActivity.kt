@@ -7,7 +7,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.Color
 import android.graphics.Matrix
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
 import android.os.CountDownTimer
@@ -142,6 +145,35 @@ class LockActivity : AppCompatActivity() {
         imageLabeler = null
     }
 
+    private fun createTactileButton(
+        label: String,
+        bgHex: String,
+        textHex: String = "#FFFFFF",
+        strokeHex: String = "#334155"
+    ): Button {
+        val bg = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = 24f
+            setColor(Color.parseColor(bgHex))
+            setStroke(4, Color.parseColor(strokeHex))
+        }
+        return Button(this).apply {
+            text = label
+            setTextColor(Color.parseColor(textHex))
+            textSize = 15f
+            typeface = Typeface.DEFAULT_BOLD
+            isAllCaps = false
+            background = bg
+            setPadding(36, 32, 36, 32)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, 14, 0, 0)
+            }
+        }
+    }
+
     private fun renderAlarmFromIntent(currentIntent: Intent) {
         stopCameraSession()
 
@@ -162,31 +194,62 @@ class LockActivity : AppCompatActivity() {
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding(40, 40, 40, 40)
+            gravity = Gravity.CENTER_HORIZONTAL
+            setBackgroundColor(Color.parseColor("#0F172A"))
+            setPadding(48, 64, 48, 56)
         }
+
+        val badgeColor = when (level) {
+            3 -> "#E03E2D"
+            2 -> "#D97706"
+            else -> "#475569"
+        }
+        val badgeLabel = when (level) {
+            3 -> "🦀 PACTO NÍVEL 3 • PROVA VISUAL IA"
+            2 -> "⚡ PACTO NÍVEL 2 • PERSISTENTE"
+            else -> "🔔 PACTO NÍVEL 1 • LEMBRETE ATIVO"
+        }
+
+        val badgeView = TextView(this).apply {
+            text = badgeLabel
+            textSize = 12f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 999f
+                setColor(Color.parseColor(badgeColor))
+            }
+            setPadding(32, 14, 32, 14)
+        }
+        root.addView(badgeView)
+
+        val timeText = if (dto != null) {
+            String.format(Locale.US, "%02d:%02d", dto.hour.toInt(), dto.minute.toInt())
+        } else {
+            "AGORA"
+        }
+
+        val clockView = TextView(this).apply {
+            text = timeText
+            textSize = 46f
+            typeface = Typeface.MONOSPACE
+            setTextColor(Color.parseColor("#F8FAFC"))
+            gravity = Gravity.CENTER
+            setPadding(0, 20, 0, 4)
+        }
+        root.addView(clockView)
 
         val titleView = TextView(this).apply {
-            text = "CRABCHECK — ALARME NÍVEL $level"
-            textSize = 20f
+            text = dto?.title ?: "Compromisso #$alarmId"
+            textSize = 24f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
+            setPadding(0, 0, 0, 24)
         }
         root.addView(titleView)
-
-        val detailText = if (dto != null) {
-            "Alarme #${dto.id}: ${dto.title}\nNível ${dto.level}" +
-                if (level == 3) " | Objeto exigido: $targetLabel" else ""
-        } else {
-            "Alarme #$alarmId\nNível $level | Objeto exigido: $targetLabel"
-        }
-
-        val detailView = TextView(this).apply {
-            text = detailText
-            textSize = 15f
-            gravity = Gravity.CENTER
-            setPadding(0, 16, 0, 24)
-        }
-        root.addView(detailView)
 
         if (level == 3) {
             renderLevel3ProofUi(root, dbPath, alarmId, targetLabel)
@@ -208,10 +271,24 @@ class LockActivity : AppCompatActivity() {
         targetLabel: String
     ) {
         val instructionView = TextView(this).apply {
-            text = "Aponte a câmara para: $targetLabel (≥70% por $REQUIRED_FRAMES frames)"
-            textSize = 16f
+            text = "📷 Aponte a câmara para: $targetLabel\n(Validação contínua: $REQUIRED_FRAMES frames ≥70%)"
+            textSize = 14f
+            setTextColor(Color.parseColor("#FCA5A5"))
+            typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
-            setPadding(0, 0, 0, 16)
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 20f
+                setColor(Color.parseColor("#1E293B"))
+                setStroke(3, Color.parseColor("#E03E2D"))
+            }
+            setPadding(28, 22, 28, 22)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, 0, 0, 20)
+            }
         }
         root.addView(instructionView)
 
@@ -227,15 +304,32 @@ class LockActivity : AppCompatActivity() {
 
         val statusView = TextView(this).apply {
             text = "Progresso: 0/$REQUIRED_FRAMES frames | Detetado: —"
-            textSize = 14f
+            textSize = 13f
+            typeface = Typeface.MONOSPACE
+            setTextColor(Color.parseColor("#6EE7B7"))
             gravity = Gravity.CENTER
-            setPadding(0, 16, 0, 16)
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 16f
+                setColor(Color.parseColor("#064E3B"))
+            }
+            setPadding(24, 18, 24, 18)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, 20, 0, 8)
+            }
         }
         telemetryView = statusView
         root.addView(statusView)
 
-        val permBtn = Button(this).apply {
-            text = "Conceder Permissão de Câmara"
+        val permBtn = createTactileButton(
+            "Conceder Permissão de Câmara",
+            "#0D9488",
+            "#FFFFFF",
+            "#10B981"
+        ).apply {
             visibility = View.GONE
             setOnClickListener {
                 ActivityCompat.requestPermissions(
@@ -248,8 +342,12 @@ class LockActivity : AppCompatActivity() {
         retryPermissionBtn = permBtn
         root.addView(permBtn)
 
-        val panicBtn = Button(this).apply {
-            text = "Saída de Pânico (FALHOU)"
+        val panicBtn = createTactileButton(
+            "Saída de Emergência (3m + Compromisso)",
+            "#1E293B",
+            "#FCA5A5",
+            "#7F1D1D"
+        ).apply {
             setOnClickListener {
                 showStructuredPanicDialog(dbPath, alarmId)
             }
@@ -263,8 +361,20 @@ class LockActivity : AppCompatActivity() {
         alarmId: String,
         level: Int
     ) {
-        val completeBtn = Button(this).apply {
-            text = "Concluir Alarme (CUMPRIDO)"
+        val spacer = View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                40
+            )
+        }
+        root.addView(spacer)
+
+        val completeBtn = createTactileButton(
+            "✓ Confirmar Cumprimento (CUMPRIDO)",
+            "#059669",
+            "#FFFFFF",
+            "#10B981"
+        ).apply {
             setOnClickListener {
                 recordAndClose(dbPath, alarmId, "CUMPRIDO")
             }
@@ -272,24 +382,36 @@ class LockActivity : AppCompatActivity() {
         root.addView(completeBtn)
 
         if (level == 2) {
-            val snoozeBtn = Button(this).apply {
-                text = "Adiar 5 min (ADIADO)"
+            val snoozeBtn = createTactileButton(
+                "⏳ Adiar 5 Minutos (ADIADO)",
+                "#D97706",
+                "#FFFFFF",
+                "#F59E0B"
+            ).apply {
                 setOnClickListener {
                     snoozeAndClose(dbPath, alarmId)
                 }
             }
             root.addView(snoozeBtn)
 
-            val panicBtn = Button(this).apply {
-                text = "Saída de Pânico (FALHOU)"
+            val panicBtn = createTactileButton(
+                "Saída de Emergência (FALHOU)",
+                "#1E293B",
+                "#FCA5A5",
+                "#7F1D1D"
+            ).apply {
                 setOnClickListener {
                     showStructuredPanicDialog(dbPath, alarmId)
                 }
             }
             root.addView(panicBtn)
         } else {
-            val dismissBtn = Button(this).apply {
-                text = "Descartar (IGNORADO)"
+            val dismissBtn = createTactileButton(
+                "Descartar por Hoje (IGNORADO)",
+                "#1E293B",
+                "#CBD5E1",
+                "#475569"
+            ).apply {
                 setOnClickListener {
                     recordAndClose(dbPath, alarmId, "IGNORADO")
                 }

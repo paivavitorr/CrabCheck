@@ -236,21 +236,23 @@ fn build_and_patch_dioxus_android(root: &Path) -> Result<()> {
         path_env
     );
 
-    let dx_status = Command::new("dx")
-        .current_dir(&app_dir)
-        .env("ANDROID_HOME", &sdk)
-        .env("ANDROID_SDK_ROOT", &sdk)
-        .env("ANDROID_NDK_HOME", &ndk)
-        .env("NDK_HOME", &ndk)
-        .env("JAVA_HOME", &jdk)
-        .env("PATH", &new_path)
-        .args(["build", "--platform", "android"])
-        .status()?;
+    for arch in ["arm64", "x64"] {
+        let dx_status = Command::new("dx")
+            .current_dir(&app_dir)
+            .env("ANDROID_HOME", &sdk)
+            .env("ANDROID_SDK_ROOT", &sdk)
+            .env("ANDROID_NDK_HOME", &ndk)
+            .env("NDK_HOME", &ndk)
+            .env("JAVA_HOME", &jdk)
+            .env("PATH", &new_path)
+            .args(["build", "--platform", "android", "--arch", arch])
+            .status()?;
 
-    if !dx_status.success() {
-        return Err(XtaskError::CommandFailed(
-            "dx build --platform android".to_string(),
-        ));
+        if !dx_status.success() {
+            return Err(XtaskError::CommandFailed(format!(
+                "dx build --platform android --arch {arch}"
+            )));
+        }
     }
 
     let gen_android = find_dx_android_dir(root)?;
@@ -308,6 +310,14 @@ fn patch_dx_android_project(root: &Path, gen_android: &Path) -> Result<()> {
     let aar_src = root.join("android/alarm-lib/build/outputs/aar/alarm-lib-release.aar");
     let aar_dst = libs_dir.join("alarm-lib.aar");
     fs::copy(&aar_src, &aar_dst)?;
+
+    // Copy brand logo to Android res/drawable
+    let res_drawable = gen_android.join("app/src/main/res/drawable");
+    fs::create_dir_all(&res_drawable)?;
+    let logo_src = root.join("assets/crabcheck.png");
+    if logo_src.exists() {
+        let _ = fs::copy(&logo_src, res_drawable.join("crabcheck_logo.png"));
+    }
 
     let gradle_kts = gen_android.join("app/build.gradle.kts");
     if gradle_kts.exists() {
@@ -444,6 +454,8 @@ fn patch_dx_android_project(root: &Path, gen_android: &Path) -> Result<()> {
             );
             manifest = manifest.replace("    <application", onboarding_perms);
         }
+        manifest = manifest.replace("android:icon=\"@mipmap/ic_launcher\"", "android:icon=\"@drawable/crabcheck_logo\"");
+        manifest = manifest.replace("android:roundIcon=\"@mipmap/ic_launcher_round\"", "android:roundIcon=\"@drawable/crabcheck_logo\"");
         fs::write(&manifest_path, manifest)?;
     }
 
