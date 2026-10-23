@@ -733,6 +733,12 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -748,13 +754,19 @@ internal interface UniffiLib : Library {
         
     }
 
+    fun uniffi_crabcheck_core_ffi_fn_func_ffi_create_note(`dbPath`: RustBuffer.ByValue,`body`: RustBuffer.ByValue,`nowEpochMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_crabcheck_core_ffi_fn_func_ffi_curated_synonyms_for(`targetLabel`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_crabcheck_core_ffi_fn_func_ffi_delete_alarm(`dbPath`: RustBuffer.ByValue,`alarmId`: RustBuffer.ByValue,`nowEpochMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    fun uniffi_crabcheck_core_ffi_fn_func_ffi_delete_note(`dbPath`: RustBuffer.ByValue,`noteId`: RustBuffer.ByValue,`nowEpochMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     fun uniffi_crabcheck_core_ffi_fn_func_ffi_get_alarm(`dbPath`: RustBuffer.ByValue,`alarmId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_crabcheck_core_ffi_fn_func_ffi_list_alarms(`dbPath`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_crabcheck_core_ffi_fn_func_ffi_list_notes_for_range(`dbPath`: RustBuffer.ByValue,`startEpochMs`: Long,`endEpochMs`: Long,`tagFilter`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_crabcheck_core_ffi_fn_func_ffi_list_outcomes(`dbPath`: RustBuffer.ByValue,`alarmId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -882,13 +894,19 @@ internal interface UniffiLib : Library {
     ): Unit
     fun ffi_crabcheck_core_ffi_rust_future_complete_void(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    fun uniffi_crabcheck_core_ffi_checksum_func_ffi_create_note(
+    ): Short
     fun uniffi_crabcheck_core_ffi_checksum_func_ffi_curated_synonyms_for(
     ): Short
     fun uniffi_crabcheck_core_ffi_checksum_func_ffi_delete_alarm(
     ): Short
+    fun uniffi_crabcheck_core_ffi_checksum_func_ffi_delete_note(
+    ): Short
     fun uniffi_crabcheck_core_ffi_checksum_func_ffi_get_alarm(
     ): Short
     fun uniffi_crabcheck_core_ffi_checksum_func_ffi_list_alarms(
+    ): Short
+    fun uniffi_crabcheck_core_ffi_checksum_func_ffi_list_notes_for_range(
     ): Short
     fun uniffi_crabcheck_core_ffi_checksum_func_ffi_list_outcomes(
     ): Short
@@ -921,16 +939,25 @@ private fun uniffiCheckContractApiVersion(lib: UniffiLib) {
 
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: UniffiLib) {
+    if (lib.uniffi_crabcheck_core_ffi_checksum_func_ffi_create_note() != 16891.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_crabcheck_core_ffi_checksum_func_ffi_curated_synonyms_for() != 17171.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_crabcheck_core_ffi_checksum_func_ffi_delete_alarm() != 38070.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_crabcheck_core_ffi_checksum_func_ffi_delete_note() != 30406.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_crabcheck_core_ffi_checksum_func_ffi_get_alarm() != 17870.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_crabcheck_core_ffi_checksum_func_ffi_list_alarms() != 22756.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_crabcheck_core_ffi_checksum_func_ffi_list_notes_for_range() != 64963.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_crabcheck_core_ffi_checksum_func_ffi_list_outcomes() != 58234.toShort()) {
@@ -1330,6 +1357,50 @@ public object FfiConverterTypeFfiOutcomeDto: FfiConverterRustBuffer<FfiOutcomeDt
 
 
 
+data class FfiQuickNoteDto (
+    var `id`: kotlin.String, 
+    var `body`: kotlin.String, 
+    var `tags`: List<kotlin.String>, 
+    var `createdAtEpochMs`: kotlin.Long, 
+    var `updatedAtEpochMs`: kotlin.Long
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiQuickNoteDto: FfiConverterRustBuffer<FfiQuickNoteDto> {
+    override fun read(buf: ByteBuffer): FfiQuickNoteDto {
+        return FfiQuickNoteDto(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterSequenceString.read(buf),
+            FfiConverterLong.read(buf),
+            FfiConverterLong.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: FfiQuickNoteDto) = (
+            FfiConverterString.allocationSize(value.`id`) +
+            FfiConverterString.allocationSize(value.`body`) +
+            FfiConverterSequenceString.allocationSize(value.`tags`) +
+            FfiConverterLong.allocationSize(value.`createdAtEpochMs`) +
+            FfiConverterLong.allocationSize(value.`updatedAtEpochMs`)
+    )
+
+    override fun write(value: FfiQuickNoteDto, buf: ByteBuffer) {
+            FfiConverterString.write(value.`id`, buf)
+            FfiConverterString.write(value.`body`, buf)
+            FfiConverterSequenceString.write(value.`tags`, buf)
+            FfiConverterLong.write(value.`createdAtEpochMs`, buf)
+            FfiConverterLong.write(value.`updatedAtEpochMs`, buf)
+    }
+}
+
+
+
 
 
 sealed class FfiException: kotlin.Exception() {
@@ -1565,7 +1636,45 @@ public object FfiConverterSequenceTypeFfiOutcomeDto: FfiConverterRustBuffer<List
             FfiConverterTypeFfiOutcomeDto.write(it, buf)
         }
     }
-} fun `ffiCuratedSynonymsFor`(`targetLabel`: kotlin.String): List<kotlin.String> {
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeFfiQuickNoteDto: FfiConverterRustBuffer<List<FfiQuickNoteDto>> {
+    override fun read(buf: ByteBuffer): List<FfiQuickNoteDto> {
+        val len = buf.getInt()
+        return List<FfiQuickNoteDto>(len) {
+            FfiConverterTypeFfiQuickNoteDto.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<FfiQuickNoteDto>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeFfiQuickNoteDto.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<FfiQuickNoteDto>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeFfiQuickNoteDto.write(it, buf)
+        }
+    }
+}
+    @Throws(FfiException::class) fun `ffiCreateNote`(`dbPath`: kotlin.String, `body`: kotlin.String, `nowEpochMs`: kotlin.Long): FfiQuickNoteDto {
+            return FfiConverterTypeFfiQuickNoteDto.lift(
+    uniffiRustCallWithError(FfiException) { _status ->
+    UniffiLib.INSTANCE.uniffi_crabcheck_core_ffi_fn_func_ffi_create_note(
+        FfiConverterString.lower(`dbPath`),FfiConverterString.lower(`body`),FfiConverterLong.lower(`nowEpochMs`),_status)
+}
+    )
+    }
+    
+ fun `ffiCuratedSynonymsFor`(`targetLabel`: kotlin.String): List<kotlin.String> {
             return FfiConverterSequenceString.lift(
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_crabcheck_core_ffi_fn_func_ffi_curated_synonyms_for(
@@ -1580,6 +1689,15 @@ public object FfiConverterSequenceTypeFfiOutcomeDto: FfiConverterRustBuffer<List
     uniffiRustCallWithError(FfiException) { _status ->
     UniffiLib.INSTANCE.uniffi_crabcheck_core_ffi_fn_func_ffi_delete_alarm(
         FfiConverterString.lower(`dbPath`),FfiConverterString.lower(`alarmId`),FfiConverterLong.lower(`nowEpochMs`),_status)
+}
+    
+    
+
+    @Throws(FfiException::class) fun `ffiDeleteNote`(`dbPath`: kotlin.String, `noteId`: kotlin.String, `nowEpochMs`: kotlin.Long)
+        = 
+    uniffiRustCallWithError(FfiException) { _status ->
+    UniffiLib.INSTANCE.uniffi_crabcheck_core_ffi_fn_func_ffi_delete_note(
+        FfiConverterString.lower(`dbPath`),FfiConverterString.lower(`noteId`),FfiConverterLong.lower(`nowEpochMs`),_status)
 }
     
     
@@ -1599,6 +1717,16 @@ public object FfiConverterSequenceTypeFfiOutcomeDto: FfiConverterRustBuffer<List
     uniffiRustCallWithError(FfiException) { _status ->
     UniffiLib.INSTANCE.uniffi_crabcheck_core_ffi_fn_func_ffi_list_alarms(
         FfiConverterString.lower(`dbPath`),_status)
+}
+    )
+    }
+    
+
+    @Throws(FfiException::class) fun `ffiListNotesForRange`(`dbPath`: kotlin.String, `startEpochMs`: kotlin.Long, `endEpochMs`: kotlin.Long, `tagFilter`: kotlin.String?): List<FfiQuickNoteDto> {
+            return FfiConverterSequenceTypeFfiQuickNoteDto.lift(
+    uniffiRustCallWithError(FfiException) { _status ->
+    UniffiLib.INSTANCE.uniffi_crabcheck_core_ffi_fn_func_ffi_list_notes_for_range(
+        FfiConverterString.lower(`dbPath`),FfiConverterLong.lower(`startEpochMs`),FfiConverterLong.lower(`endEpochMs`),FfiConverterOptionalString.lower(`tagFilter`),_status)
 }
     )
     }

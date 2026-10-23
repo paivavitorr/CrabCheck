@@ -89,6 +89,15 @@ pub struct FfiOutcomeDto {
     pub confidence: Option<f32>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct FfiQuickNoteDto {
+    pub id: String,
+    pub body: String,
+    pub tags: Vec<String>,
+    pub created_at_epoch_ms: i64,
+    pub updated_at_epoch_ms: i64,
+}
+
 #[uniffi::export]
 pub fn ffi_curated_synonyms_for(target_label: String) -> Vec<String> {
     curated_synonyms_for(&target_label)
@@ -205,6 +214,56 @@ pub fn ffi_list_outcomes(
             proof_image_path: r.proof_image_path,
             matched_label: r.matched_label,
             confidence: r.confidence,
+        })
+        .collect())
+}
+
+#[uniffi::export]
+pub fn ffi_create_note(
+    db_path: String,
+    body: String,
+    now_epoch_ms: i64,
+) -> Result<FfiQuickNoteDto, FfiError> {
+    let store = CoreStore::open(&db_path)?;
+    let note = store.create_note(&body, now_epoch_ms)?;
+    Ok(FfiQuickNoteDto {
+        id: note.id,
+        body: note.body,
+        tags: note.tags,
+        created_at_epoch_ms: note.created_at_epoch_ms,
+        updated_at_epoch_ms: note.updated_at_epoch_ms,
+    })
+}
+
+#[uniffi::export]
+pub fn ffi_delete_note(
+    db_path: String,
+    note_id: String,
+    now_epoch_ms: i64,
+) -> Result<(), FfiError> {
+    let store = CoreStore::open(&db_path)?;
+    store.delete_note(&note_id, now_epoch_ms)?;
+    Ok(())
+}
+
+#[uniffi::export]
+pub fn ffi_list_notes_for_range(
+    db_path: String,
+    start_epoch_ms: i64,
+    end_epoch_ms: i64,
+    tag_filter: Option<String>,
+) -> Result<Vec<FfiQuickNoteDto>, FfiError> {
+    let store = CoreStore::open(&db_path)?;
+    let notes =
+        store.list_notes_for_range(start_epoch_ms, end_epoch_ms, tag_filter.as_deref())?;
+    Ok(notes
+        .into_iter()
+        .map(|n| FfiQuickNoteDto {
+            id: n.id,
+            body: n.body,
+            tags: n.tags,
+            created_at_epoch_ms: n.created_at_epoch_ms,
+            updated_at_epoch_ms: n.updated_at_epoch_ms,
         })
         .collect())
 }

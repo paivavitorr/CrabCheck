@@ -9,10 +9,13 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import uniffi.crabcheck_core_ffi.FfiAlarmDto
+import uniffi.crabcheck_core_ffi.ffiCreateNote
 import uniffi.crabcheck_core_ffi.ffiCuratedSynonymsFor
 import uniffi.crabcheck_core_ffi.ffiDeleteAlarm
+import uniffi.crabcheck_core_ffi.ffiDeleteNote
 import uniffi.crabcheck_core_ffi.ffiGetAlarm
 import uniffi.crabcheck_core_ffi.ffiListAlarms
+import uniffi.crabcheck_core_ffi.ffiListNotesForRange
 import uniffi.crabcheck_core_ffi.ffiListOutcomes
 import uniffi.crabcheck_core_ffi.ffiMatchesCuratedLabel
 import uniffi.crabcheck_core_ffi.ffiRecordOutcome
@@ -162,5 +165,28 @@ class FfiRoundtripTest {
         assertFalse(AlarmStateManager.isN3AlarmActive())
         assertNull(AlarmStateManager.getActiveAlarmId())
         assertFalse(AlarmStateManager.isPanicActive())
+    }
+
+    @Test
+    fun quickNotesFfiRoundtrip() {
+        val dbFile = tempFolder.newFile("notes_kotlin_test.db")
+        val dbPath = dbFile.absolutePath
+        val now = 1_700_100_000_000L
+
+        val note1 = ffiCreateNote(dbPath, "Treino de força concluído #foco #treino", now)
+        val note2 = ffiCreateNote(dbPath, "Leitura técnica #estudo", now + 1_000L)
+        assertEquals(listOf("foco", "treino"), note1.tags)
+
+        val allNotes = ffiListNotesForRange(dbPath, now - 10_000L, now + 10_000L, null)
+        assertEquals(2, allNotes.size)
+
+        val filtered = ffiListNotesForRange(dbPath, now - 10_000L, now + 10_000L, "#estudo")
+        assertEquals(1, filtered.size)
+        assertEquals(note2.id, filtered[0].id)
+
+        ffiDeleteNote(dbPath, note1.id, now + 2_000L)
+        val remaining = ffiListNotesForRange(dbPath, now - 10_000L, now + 10_000L, null)
+        assertEquals(1, remaining.size)
+        assertEquals(note2.id, remaining[0].id)
     }
 }

@@ -436,6 +436,14 @@ fn patch_dx_android_project(root: &Path, gen_android: &Path) -> Result<()> {
             );
             manifest = manifest.replace("    <application", boot_perms);
         }
+        if !manifest.contains("android.permission.SYSTEM_ALERT_WINDOW") {
+            let onboarding_perms = concat!(
+                "    <uses-permission android:name=\"android.permission.SYSTEM_ALERT_WINDOW\" />\n",
+                "    <uses-permission android:name=\"android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS\" />\n",
+                "    <application"
+            );
+            manifest = manifest.replace("    <application", onboarding_perms);
+        }
         fs::write(&manifest_path, manifest)?;
     }
 

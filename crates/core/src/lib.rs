@@ -302,6 +302,102 @@ pub struct AlarmOutcomeRecord {
     pub confidence: Option<f32>,
 }
 
+pub fn extract_hashtags(body: &str) -> Vec<String> {
+    let mut tags = Vec::new();
+    for token in body.split_whitespace() {
+        if let Some(rest) = token.strip_prefix('#') {
+            let cleaned: String = rest
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
+                .collect::<String>()
+                .to_lowercase();
+            if !cleaned.is_empty() && !tags.contains(&cleaned) {
+                tags.push(cleaned);
+            }
+        }
+    }
+    tags
+}
+
+pub fn format_local_time_hm(epoch_ms: i64) -> String {
+    match Local.timestamp_millis_opt(epoch_ms) {
+        LocalResult::Single(dt) | LocalResult::Ambiguous(dt, _) => {
+            dt.format("%H:%M").to_string()
+        }
+        LocalResult::None => epoch_ms.to_string(),
+    }
+}
+
+pub fn format_local_time_hms(epoch_ms: i64) -> String {
+    match Local.timestamp_millis_opt(epoch_ms) {
+        LocalResult::Single(dt) | LocalResult::Ambiguous(dt, _) => {
+            dt.format("%H:%M:%S").to_string()
+        }
+        LocalResult::None => epoch_ms.to_string(),
+    }
+}
+
+pub fn day_reference_epoch_ms(now_epoch_ms: i64, day_offset: i64) -> i64 {
+    if day_offset == 0 {
+        return now_epoch_ms;
+    }
+    let base_dt = match Local.timestamp_millis_opt(now_epoch_ms) {
+        LocalResult::Single(dt) | LocalResult::Ambiguous(dt, _) => dt,
+        LocalResult::None => return now_epoch_ms + day_offset * 86_400_000,
+    };
+    let target_date = if day_offset > 0 {
+        base_dt
+            .date_naive()
+            .checked_add_days(Days::new(day_offset as u64))
+    } else {
+        base_dt
+            .date_naive()
+            .checked_sub_days(Days::new((-day_offset) as u64))
+    };
+    if let (Some(date), Some(noon)) = (target_date, NaiveTime::from_hms_opt(12, 0, 0)) {
+        let naive_dt = date.and_time(noon);
+        if let LocalResult::Single(dt) | LocalResult::Ambiguous(dt, _) =
+            Local.from_local_datetime(&naive_dt)
+        {
+            return dt.timestamp_millis();
+        }
+    }
+    now_epoch_ms + day_offset * 86_400_000
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QuickNoteRecord {
+    pub id: String,
+    pub body: String,
+    pub tags: Vec<String>,
+    pub created_at_epoch_ms: i64,
+    pub updated_at_epoch_ms: i64,
+    pub deleted_at_epoch_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TimelineOutcomeEntry {
+    pub id: i64,
+    pub alarm_id: String,
+    pub alarm_title: String,
+    pub alarm_level: AlarmLevel,
+    pub outcome: String,
+    pub recorded_at_epoch_ms: i64,
+    pub proof_image_path: Option<String>,
+    pub matched_label: Option<String>,
+    pub confidence: Option<f32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DailyTimelineSnapshot {
+    pub date_iso: String,
+    pub day_start_epoch_ms: i64,
+    pub day_end_epoch_ms: i64,
+    pub scheduled_alarms: Vec<AlarmSpec>,
+    pub outcomes: Vec<TimelineOutcomeEntry>,
+    pub notes: Vec<QuickNoteRecord>,
+}
+
 pub struct CoreStore {
     conn: Connection,
 }
@@ -348,7 +444,19 @@ impl CoreStore {
                 proof_image_path TEXT,
                 matched_label TEXT,
                 confidence REAL
-            );",
+            );
+            CREATE TABLE IF NOT EXISTS quick_notes (
+                id TEXT PRIMARY KEY,
+                body TEXT NOT NULL,
+                tags_csv TEXT NOT NULL DEFAULT '',
+                created_at_epoch_ms INTEGER NOT NULL,
+                updated_at_epoch_ms INTEGER NOT NULL,
+                deleted_at_epoch_ms INTEGER
+            );
+            CREATE INDEX IF NOT EXISTS idx_alarm_outcomes_recorded_at
+                ON alarm_outcomes(recorded_at_epoch_ms);
+            CREATE INDEX IF NOT EXISTS idx_quick_notes_created_at
+                ON quick_notes(created_at_epoch_ms);",
         )?;
 
         self.migrate_spike_columns_if_needed()?;
@@ -778,6 +886,209 @@ impl CoreStore {
         }
         Ok(out)
     }
+
+    pub fn create_note(&self, body: &str, now_epoch_ms: i64) -> Result<QuickNoteRecord> {
+        let trimmed = body.trim();
+        if trimmed.is_empty() {
+            return Err(CoreError::Validation(
+                "O texto da nota não pode estar vazio".to_string(),
+            ));
+        }
+
+        let id = Uuid::now_v7().to_string();
+        let tags = extract_hashtags(trimmed);
+        let tags_csv = tags.join(",");
+
+        self.conn.execute(
+            "INSERT INTO quick_notes (
+                id, body, tags_csv, created_at_epoch_ms, updated_at_epoch_ms, deleted_at_epoch_ms
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, NULL)",
+            params![id, trimmed, tags_csv, now_epoch_ms, now_epoch_ms],
+        )?;
+
+        Ok(QuickNoteRecord {
+            id,
+            body: trimmed.to_string(),
+            tags,
+            created_at_epoch_ms: now_epoch_ms,
+            updated_at_epoch_ms: now_epoch_ms,
+            deleted_at_epoch_ms: None,
+        })
+    }
+
+    pub fn delete_note(&self, note_id: &str, now_epoch_ms: i64) -> Result<()> {
+        let updated = self.conn.execute(
+            "UPDATE quick_notes
+             SET deleted_at_epoch_ms = ?2, updated_at_epoch_ms = ?2
+             WHERE id = ?1 AND deleted_at_epoch_ms IS NULL",
+            params![note_id, now_epoch_ms],
+        )?;
+        if updated == 0 {
+            return Err(CoreError::NotFound(note_id.to_string()));
+        }
+        Ok(())
+    }
+
+    pub fn list_notes_for_range(
+        &self,
+        start_epoch_ms: i64,
+        end_epoch_ms: i64,
+        tag_filter: Option<&str>,
+    ) -> Result<Vec<QuickNoteRecord>> {
+        let normalized_filter = tag_filter
+            .map(|t| t.trim().trim_start_matches('#').to_lowercase())
+            .filter(|t| !t.is_empty());
+
+        let mut stmt = self.conn.prepare(
+            "SELECT id, body, tags_csv, created_at_epoch_ms, updated_at_epoch_ms, deleted_at_epoch_ms
+             FROM quick_notes
+             WHERE deleted_at_epoch_ms IS NULL
+               AND created_at_epoch_ms >= ?1
+               AND created_at_epoch_ms <= ?2
+             ORDER BY created_at_epoch_ms DESC, id DESC",
+        )?;
+
+        let rows = stmt.query_map(params![start_epoch_ms, end_epoch_ms], |row| {
+            let tags_csv: String = row.get(2)?;
+            let tags: Vec<String> = tags_csv
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            Ok(QuickNoteRecord {
+                id: row.get(0)?,
+                body: row.get(1)?,
+                tags,
+                created_at_epoch_ms: row.get(3)?,
+                updated_at_epoch_ms: row.get(4)?,
+                deleted_at_epoch_ms: row.get(5)?,
+            })
+        })?;
+
+        let mut out = Vec::new();
+        for row in rows {
+            let record = row?;
+            if let Some(ref wanted_tag) = normalized_filter {
+                if !record.tags.iter().any(|t| t == wanted_tag) {
+                    continue;
+                }
+            }
+            out.push(record);
+        }
+        Ok(out)
+    }
+
+    pub fn list_outcomes_for_range(
+        &self,
+        start_epoch_ms: i64,
+        end_epoch_ms: i64,
+    ) -> Result<Vec<TimelineOutcomeEntry>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT
+                o.id,
+                o.alarm_id,
+                COALESCE(a.title, o.alarm_id) AS alarm_title,
+                COALESCE(a.level, 3) AS alarm_level,
+                o.outcome,
+                o.recorded_at_epoch_ms,
+                o.proof_image_path,
+                o.matched_label,
+                o.confidence
+             FROM alarm_outcomes o
+             LEFT JOIN alarms a ON a.id = o.alarm_id
+             WHERE o.recorded_at_epoch_ms >= ?1
+               AND o.recorded_at_epoch_ms <= ?2
+             ORDER BY o.recorded_at_epoch_ms DESC, o.id DESC",
+        )?;
+
+        let rows = stmt.query_map(params![start_epoch_ms, end_epoch_ms], |row| {
+            let level_raw: i64 = row.get(3)?;
+            let conf_f64: Option<f64> = row.get(8)?;
+            Ok(TimelineOutcomeEntry {
+                id: row.get(0)?,
+                alarm_id: row.get(1)?,
+                alarm_title: row.get(2)?,
+                alarm_level: AlarmLevel::from_i64(level_raw),
+                outcome: row.get(4)?,
+                recorded_at_epoch_ms: row.get(5)?,
+                proof_image_path: row.get(6)?,
+                matched_label: row.get(7)?,
+                confidence: conf_f64.map(|v| v as f32),
+            })
+        })?;
+
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    pub fn daily_timeline(
+        &self,
+        reference_epoch_ms: i64,
+        tag_filter: Option<&str>,
+    ) -> Result<DailyTimelineSnapshot> {
+        let ref_dt = match Local.timestamp_millis_opt(reference_epoch_ms) {
+            LocalResult::Single(dt) | LocalResult::Ambiguous(dt, _) => dt,
+            LocalResult::None => {
+                return Err(CoreError::Validation(format!(
+                    "Timestamp de referência inválido: {reference_epoch_ms}"
+                )))
+            }
+        };
+
+        let date_naive = ref_dt.date_naive();
+        let date_iso = date_naive.format("%Y-%m-%d").to_string();
+
+        let start_time = NaiveTime::from_hms_milli_opt(0, 0, 0, 0)
+            .ok_or_else(|| CoreError::Validation("Erro ao criar início do dia".to_string()))?;
+        let end_time = NaiveTime::from_hms_milli_opt(23, 59, 59, 999)
+            .ok_or_else(|| CoreError::Validation("Erro ao criar fim do dia".to_string()))?;
+
+        let start_naive = date_naive.and_time(start_time);
+        let end_naive = date_naive.and_time(end_time);
+
+        let day_start_epoch_ms = match Local.from_local_datetime(&start_naive) {
+            LocalResult::Single(dt) | LocalResult::Ambiguous(dt, _) => dt.timestamp_millis(),
+            LocalResult::None => reference_epoch_ms,
+        };
+        let day_end_epoch_ms = match Local.from_local_datetime(&end_naive) {
+            LocalResult::Single(dt) | LocalResult::Ambiguous(dt, _) => dt.timestamp_millis(),
+            LocalResult::None => reference_epoch_ms + 86_399_999,
+        };
+
+        let weekday_bit = 1u8 << date_naive.weekday().num_days_from_monday();
+        let all_alarms = self.list_alarms()?;
+        let mut scheduled_alarms: Vec<AlarmSpec> = all_alarms
+            .into_iter()
+            .filter(|alarm| {
+                if !alarm.enabled || alarm.created_at_epoch_ms > day_end_epoch_ms {
+                    return false;
+                }
+                if alarm.weekdays_mask == 0 {
+                    alarm.trigger_at_epoch_ms >= day_start_epoch_ms
+                        && alarm.trigger_at_epoch_ms <= day_end_epoch_ms
+                } else {
+                    (alarm.weekdays_mask & weekday_bit) != 0
+                }
+            })
+            .collect();
+        scheduled_alarms.sort_by_key(|a| (a.hour, a.minute, a.id.clone()));
+
+        let outcomes = self.list_outcomes_for_range(day_start_epoch_ms, day_end_epoch_ms)?;
+        let notes = self.list_notes_for_range(day_start_epoch_ms, day_end_epoch_ms, tag_filter)?;
+
+        Ok(DailyTimelineSnapshot {
+            date_iso,
+            day_start_epoch_ms,
+            day_end_epoch_ms,
+            scheduled_alarms,
+            outcomes,
+            notes,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -974,6 +1285,57 @@ mod tests {
             ),
             Err(CoreError::Validation(_))
         ));
+
+        Ok(())
+    }
+
+    #[test]
+    fn quick_notes_tags_and_daily_timeline() -> Result<()> {
+        let tags = extract_hashtags("Treino matinal concluído! #Foco #treino_pesado, #foco #energia-100.");
+        assert_eq!(tags, vec!["foco", "treino_pesado", "energia-100"]);
+
+        let store = CoreStore::open_in_memory()?;
+        let now = 1_700_050_000_000;
+
+        let mut alarm = sample_alarm("alarm-tl-1", AlarmLevel::ProofOfAction, 0b0111_1111);
+        alarm.created_at_epoch_ms = now - 10_000;
+        alarm.updated_at_epoch_ms = now - 10_000;
+        store.upsert_alarm(&alarm)?;
+
+        // Alarm created in the future should not appear in today's timeline (R4)
+        let mut future_alarm = sample_alarm("alarm-future", AlarmLevel::Passive, 0b0111_1111);
+        future_alarm.created_at_epoch_ms = now + 100_000_000;
+        future_alarm.updated_at_epoch_ms = now + 100_000_000;
+        store.upsert_alarm(&future_alarm)?;
+
+        store.record_outcome_with_proof(
+            "alarm-tl-1",
+            "CUMPRIDO",
+            now + 1_000,
+            Some("/data/proof.jpg"),
+            Some("Shoe"),
+            Some(0.92),
+        )?;
+
+        let n1 = store.create_note("Leitura de 20 páginas #leitura #habito", now + 2_000)?;
+        let n2 = store.create_note("Sessão de corrida #corrida #habito", now + 3_000)?;
+        assert_eq!(n1.tags, vec!["leitura", "habito"]);
+
+        let snap_all = store.daily_timeline(now, None)?;
+        assert_eq!(snap_all.scheduled_alarms.len(), 1);
+        assert_eq!(snap_all.scheduled_alarms[0].id, "alarm-tl-1");
+        assert_eq!(snap_all.outcomes.len(), 1);
+        assert_eq!(snap_all.outcomes[0].alarm_title, "Ginásio às 06:00");
+        assert_eq!(snap_all.notes.len(), 2);
+
+        let snap_filtered = store.daily_timeline(now, Some("#leitura"))?;
+        assert_eq!(snap_filtered.notes.len(), 1);
+        assert_eq!(snap_filtered.notes[0].id, n1.id);
+
+        store.delete_note(&n2.id, now + 4_000)?;
+        let snap_after_del = store.daily_timeline(now, None)?;
+        assert_eq!(snap_after_del.notes.len(), 1);
+        assert_eq!(snap_after_del.notes[0].id, n1.id);
 
         Ok(())
     }
