@@ -19,30 +19,72 @@ pub const CURATED_OBJECT_LABELS: &[(&str, &str)] = &[
 pub fn curated_synonyms_for(target_label: &str) -> Vec<String> {
     let norm = target_label.trim().to_ascii_lowercase();
     let synonyms: &[&str] = match norm.as_str() {
-        "shoe" => &[
+        "shoe" | "sapato" | "tenis" | "tênis" | "calcado" | "calçado" => &[
             "shoe",
+            "sapato",
             "footwear",
             "sneakers",
             "boot",
             "sandal",
             "sports equipment",
+            "athletic shoe",
+            "walking shoe",
+            "outdoor shoe",
+            "plimsoll shoe",
         ],
-        "book" => &["book", "publication", "paper", "notebook", "novel"],
-        "bottle" => &[
+        "book" | "livro" | "caderno" => &[
+            "book",
+            "livro",
+            "publication",
+            "paper",
+            "notebook",
+            "novel",
+            "textbook",
+            "magazine",
+            "booklet",
+            "pamphlet",
+            "document",
+            "paper product",
+            "hardcover",
+            "binder",
+            "album",
+            "comic book",
+            "diary",
+            "journal",
+            "open book",
+        ],
+        "bottle" | "garrafa" | "garrafinha" => &[
             "bottle",
+            "garrafa",
             "water bottle",
             "drinkware",
             "plastic bottle",
             "glass bottle",
+            "thermos",
+            "flask",
         ],
-        "cup" => &["cup", "mug", "coffee cup", "tableware", "drinkware", "teacup"],
-        "laptop" => &[
+        "cup" | "copo" | "caneca" | "xicara" | "xícara" => &[
+            "cup",
+            "copo",
+            "caneca",
+            "mug",
+            "coffee cup",
+            "tableware",
+            "drinkware",
+            "teacup",
+            "tumbler",
+            "beaker",
+        ],
+        "laptop" | "computador" | "pc" | "notebook" => &[
             "laptop",
+            "computador",
             "computer",
             "personal computer",
             "netbook",
             "computer keyboard",
             "display device",
+            "monitor",
+            "computer hardware",
         ],
         _ => return if norm.is_empty() { Vec::new() } else { vec![norm] },
     };
@@ -54,9 +96,12 @@ pub fn matches_curated_label(target_label: &str, detected_label: &str) -> bool {
     if detected.is_empty() {
         return false;
     }
-    curated_synonyms_for(target_label)
-        .iter()
-        .any(|syn| syn == &detected)
+    curated_synonyms_for(target_label).iter().any(|syn| {
+        let syn = syn.to_ascii_lowercase();
+        detected == syn
+            || (syn.len() >= 4 && detected.contains(&syn))
+            || (detected.len() >= 4 && syn.contains(&detected))
+    })
 }
 
 #[derive(Error, Debug)]
@@ -1413,7 +1458,11 @@ mod tests {
         assert!(matches_curated_label("Shoe", "Footwear"));
         assert!(matches_curated_label("Shoe", "sneakers"));
         assert!(matches_curated_label("Book", "Publication"));
+        assert!(matches_curated_label("Book", "Open book"));
+        assert!(matches_curated_label("Livro", "Book"));
+        assert!(matches_curated_label("livro", "Textbook"));
         assert!(matches_curated_label("Bottle", "Water bottle"));
+        assert!(matches_curated_label("Garrafa", "bottle"));
         assert!(matches_curated_label("Cup", "Mug"));
         assert!(matches_curated_label("Laptop", "Personal computer"));
         assert!(!matches_curated_label("Shoe", "Mug"));

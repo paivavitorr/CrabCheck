@@ -56,8 +56,8 @@ class LockActivity : AppCompatActivity() {
 
     companion object {
         private const val REQUEST_CAMERA_PERMISSION = 1001
-        private const val REQUIRED_FRAMES = 5
-        private const val CONFIDENCE_THRESHOLD = 0.70f
+        private const val REQUIRED_FRAMES = 3
+        private const val CONFIDENCE_THRESHOLD = 0.58f
         private const val SNOOZE_DURATION_MS = 5L * 60L * 1000L
         private const val PANIC_COUNTDOWN_MS = 3L * 60L * 1000L
         private const val COMMITMENT_PHRASE = "ESTOU DESISTINDO DO MEU COMPROMISSO"
@@ -271,7 +271,7 @@ class LockActivity : AppCompatActivity() {
         targetLabel: String
     ) {
         val instructionView = TextView(this).apply {
-            text = "📷 Aponte a câmara para: $targetLabel\n(Validação contínua: $REQUIRED_FRAMES frames ≥70%)"
+            text = "📷 Aponte a câmara para: $targetLabel\n(Validação: $REQUIRED_FRAMES frames estáveis ≥58%)"
             textSize = 14f
             setTextColor(Color.parseColor("#FCA5A5"))
             typeface = Typeface.DEFAULT_BOLD
@@ -303,15 +303,16 @@ class LockActivity : AppCompatActivity() {
         root.addView(cameraPreview)
 
         val statusView = TextView(this).apply {
-            text = "Progresso: 0/$REQUIRED_FRAMES frames | Detetado: —"
+            text = "🔍 A procurar: $targetLabel (0/$REQUIRED_FRAMES frames)\nCena detetada: —"
             textSize = 13f
             typeface = Typeface.MONOSPACE
-            setTextColor(Color.parseColor("#6EE7B7"))
+            setTextColor(Color.parseColor("#93C5FD"))
             gravity = Gravity.CENTER
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = 16f
-                setColor(Color.parseColor("#064E3B"))
+                setColor(Color.parseColor("#1E293B"))
+                setStroke(1, Color.parseColor("#334155"))
             }
             setPadding(24, 18, 24, 18)
             layoutParams = LinearLayout.LayoutParams(
@@ -561,17 +562,45 @@ class LockActivity : AppCompatActivity() {
                     return@addOnSuccessListener
                 }
                 val candidates = labels.map { it.text to it.confidence }
+                android.util.Log.d("CrabCheckVision", "Alvo=${tracker.targetLabel} | Labels: " + candidates.joinToString { "${it.first}=${(it.second * 100).toInt()}%" })
+
                 when (val step = tracker.onFrameLabels(candidates)) {
                     is ProofStepResult.Searching -> {
-                        val candidateSummary = if (step.bestCandidateLabel != null && step.bestCandidateConfidence != null) {
-                            val pct = String.format(Locale.US, "%.0f%%", step.bestCandidateConfidence * 100f)
-                            "${step.bestCandidateLabel} ($pct)"
-                        } else {
-                            "—"
-                        }
                         runOnUiThread {
-                            telemetryView?.text =
-                                "Progresso: ${step.consecutiveHits}/$REQUIRED_FRAMES frames | Detetado: $candidateSummary"
+                            if (step.matchedTargetLabel != null && step.consecutiveHits > 0) {
+                                val pct = String.format(Locale.US, "%.0f%%", (step.matchedTargetConfidence ?: 0f) * 100f)
+                                telemetryView?.text =
+                                    "🎯 Alvo detetado: ${step.matchedTargetLabel} ($pct)\nEstabilizando: ${step.consecutiveHits}/$REQUIRED_FRAMES frames"
+                                telemetryView?.setTextColor(Color.parseColor("#34D399"))
+                                (telemetryView?.background as? GradientDrawable)?.apply {
+                                    setColor(Color.parseColor("#065F46"))
+                                    setStroke(3, Color.parseColor("#10B981"))
+                                }
+                            } else if (step.matchedTargetLabel != null) {
+                                val pct = String.format(Locale.US, "%.0f%%", (step.matchedTargetConfidence ?: 0f) * 100f)
+                                val needPct = String.format(Locale.US, "%.0f%%", CONFIDENCE_THRESHOLD * 100f)
+                                telemetryView?.text =
+                                    "🔍 Alvo aproximado: ${step.matchedTargetLabel} ($pct < $needPct)\nAproxime ou ilumine melhor o objeto"
+                                telemetryView?.setTextColor(Color.parseColor("#FDE047"))
+                                (telemetryView?.background as? GradientDrawable)?.apply {
+                                    setColor(Color.parseColor("#78350F"))
+                                    setStroke(2, Color.parseColor("#F59E0B"))
+                                }
+                            } else {
+                                val sceneText = if (step.topSceneLabel != null && step.topSceneConfidence != null) {
+                                    val pct = String.format(Locale.US, "%.0f%%", step.topSceneConfidence * 100f)
+                                    "${step.topSceneLabel} ($pct)"
+                                } else {
+                                    "—"
+                                }
+                                telemetryView?.text =
+                                    "🔍 A procurar: ${step.targetLabel} (0/$REQUIRED_FRAMES frames)\nCena detetada: $sceneText"
+                                telemetryView?.setTextColor(Color.parseColor("#93C5FD"))
+                                (telemetryView?.background as? GradientDrawable)?.apply {
+                                    setColor(Color.parseColor("#1E293B"))
+                                    setStroke(1, Color.parseColor("#334155"))
+                                }
+                            }
                         }
                     }
 
@@ -580,7 +609,12 @@ class LockActivity : AppCompatActivity() {
                             val pct = String.format(Locale.US, "%.0f%%", step.confidence * 100f)
                             runOnUiThread {
                                 telemetryView?.text =
-                                    "Validado! ${step.matchedLabel} ($pct) — Gravando prova..."
+                                    "✅ VALIDADO COM SUCESSO!\n${step.matchedLabel} ($pct) — A gravar prova..."
+                                telemetryView?.setTextColor(Color.parseColor("#FFFFFF"))
+                                (telemetryView?.background as? GradientDrawable)?.apply {
+                                    setColor(Color.parseColor("#047857"))
+                                    setStroke(4, Color.parseColor("#34D399"))
+                                }
                             }
                             val now = System.currentTimeMillis()
                             val savedPath = saveValidatedFrameJpeg(imageProxy, rotationDegrees, alarmId, now)
