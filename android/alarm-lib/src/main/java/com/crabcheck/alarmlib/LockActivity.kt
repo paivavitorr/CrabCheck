@@ -26,6 +26,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.camera.core.CameraControl
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
@@ -57,7 +58,7 @@ class LockActivity : AppCompatActivity() {
     companion object {
         private const val REQUEST_CAMERA_PERMISSION = 1001
         private const val REQUIRED_FRAMES = 3
-        private const val CONFIDENCE_THRESHOLD = 0.58f
+        private const val CONFIDENCE_THRESHOLD = 0.45f
         private const val SNOOZE_DURATION_MS = 5L * 60L * 1000L
         private const val PANIC_COUNTDOWN_MS = 3L * 60L * 1000L
         private const val COMMITMENT_PHRASE = "ESTOU DESISTINDO DO MEU COMPROMISSO"
@@ -65,6 +66,9 @@ class LockActivity : AppCompatActivity() {
 
     private var cameraExecutor: ExecutorService? = null
     private var cameraProvider: ProcessCameraProvider? = null
+    private var cameraControl: CameraControl? = null
+    private var isTorchOn = false
+    private var torchBtn: Button? = null
     private var imageLabeler: ImageLabeler? = null
     private val hasCompletedProof = AtomicBoolean(false)
     private var panicDialog: AlertDialog? = null
@@ -134,6 +138,14 @@ class LockActivity : AppCompatActivity() {
 
     private fun stopCameraSession() {
         hasCompletedProof.set(true)
+        if (isTorchOn) {
+            try {
+                cameraControl?.enableTorch(false)
+            } catch (_: Throwable) {
+            }
+            isTorchOn = false
+        }
+        cameraControl = null
         try {
             cameraProvider?.unbindAll()
         } catch (_: Throwable) {
@@ -325,6 +337,30 @@ class LockActivity : AppCompatActivity() {
         telemetryView = statusView
         root.addView(statusView)
 
+        val torch = createTactileButton(
+            "🔦 Ligar Lanterna",
+            "#1E293B",
+            "#FDE047",
+            "#CA8A04"
+        ).apply {
+            setOnClickListener {
+                isTorchOn = !isTorchOn
+                try {
+                    cameraControl?.enableTorch(isTorchOn)
+                } catch (_: Throwable) {
+                }
+                text = if (isTorchOn) "🔦 Desligar Lanterna" else "🔦 Ligar Lanterna"
+                val strokeColor = if (isTorchOn) "#EAB308" else "#CA8A04"
+                val bgColor = if (isTorchOn) "#854D0E" else "#1E293B"
+                (background as? GradientDrawable)?.apply {
+                    setColor(Color.parseColor(bgColor))
+                    setStroke(3, Color.parseColor(strokeColor))
+                }
+            }
+        }
+        torchBtn = torch
+        root.addView(torch)
+
         val permBtn = createTactileButton(
             "Conceder Permissão de Câmara",
             "#0D9488",
@@ -495,7 +531,7 @@ class LockActivity : AppCompatActivity() {
             val resolutionSelector = ResolutionSelector.Builder()
                 .setResolutionStrategy(
                     ResolutionStrategy(
-                        Size(1280, 720),
+                        Size(640, 480),
                         ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
                     )
                 )
@@ -519,12 +555,13 @@ class LockActivity : AppCompatActivity() {
 
             try {
                 provider.unbindAll()
-                provider.bindToLifecycle(
+                val camera = provider.bindToLifecycle(
                     this,
                     CameraSelector.DEFAULT_BACK_CAMERA,
                     preview,
                     imageAnalysis
                 )
+                cameraControl = camera.cameraControl
             } catch (t: Throwable) {
                 runOnUiThread {
                     telemetryView?.text = "Falha ao abrir câmara traseira: ${t.message}"
@@ -569,8 +606,9 @@ class LockActivity : AppCompatActivity() {
                         runOnUiThread {
                             if (step.matchedTargetLabel != null && step.consecutiveHits > 0) {
                                 val pct = String.format(Locale.US, "%.0f%%", (step.matchedTargetConfidence ?: 0f) * 100f)
+                                val dots = "●".repeat(step.consecutiveHits) + "○".repeat(maxOf(0, REQUIRED_FRAMES - step.consecutiveHits))
                                 telemetryView?.text =
-                                    "🎯 Alvo detetado: ${step.matchedTargetLabel} ($pct)\nEstabilizando: ${step.consecutiveHits}/$REQUIRED_FRAMES frames"
+                                    "🎯 Alvo detetado: ${step.matchedTargetLabel} ($pct)\nEstabilizando: $dots (${step.consecutiveHits}/$REQUIRED_FRAMES frames)"
                                 telemetryView?.setTextColor(Color.parseColor("#34D399"))
                                 (telemetryView?.background as? GradientDrawable)?.apply {
                                     setColor(Color.parseColor("#065F46"))
@@ -587,14 +625,15 @@ class LockActivity : AppCompatActivity() {
                                     setStroke(2, Color.parseColor("#F59E0B"))
                                 }
                             } else {
-                                val sceneText = if (step.topSceneLabel != null && step.topSceneConfidence != null) {
-                                    val pct = String.format(Locale.US, "%.0f%%", step.topSceneConfidence * 100f)
-                                    "${step.topSceneLabel} ($pct)"
+                                val topList = if (step.topCandidates.isNotEmpty()) {
+                                    step.topCandidates.mapIndexed { idx, (lbl, conf) ->
+                                        "${idx + 1}. $lbl (${(conf * 100).toInt()}%)"
+                                    }.joinToString("  •  ")
                                 } else {
                                     "—"
                                 }
                                 telemetryView?.text =
-                                    "🔍 A procurar: ${step.targetLabel} (0/$REQUIRED_FRAMES frames)\nCena detetada: $sceneText"
+                                    "🔍 A procurar: ${step.targetLabel}\nCena: $topList"
                                 telemetryView?.setTextColor(Color.parseColor("#93C5FD"))
                                 (telemetryView?.background as? GradientDrawable)?.apply {
                                     setColor(Color.parseColor("#1E293B"))

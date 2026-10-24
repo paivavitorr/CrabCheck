@@ -9,7 +9,8 @@ sealed class ProofStepResult {
         val matchedTargetLabel: String?,
         val matchedTargetConfidence: Float?,
         val topSceneLabel: String?,
-        val topSceneConfidence: Float?
+        val topSceneConfidence: Float?,
+        val topCandidates: List<Pair<String, Float>> = emptyList()
     ) : ProofStepResult() {
         val bestCandidateLabel: String?
             get() = matchedTargetLabel ?: topSceneLabel
@@ -26,7 +27,7 @@ sealed class ProofStepResult {
 
 class ProofFrameTracker(
     val targetLabel: String,
-    val confidenceThreshold: Float = 0.58f,
+    val confidenceThreshold: Float = 0.45f,
     val requiredFrames: Int = 3
 ) {
     private val acceptedSynonyms: Set<String> =
@@ -42,20 +43,23 @@ class ProofFrameTracker(
         return acceptedSynonyms.any { syn ->
             norm == syn ||
                 (syn.length >= 4 && norm.contains(syn)) ||
-                (norm.length >= 4 && syn.contains(norm))
+                (norm.length >= 4 && syn.contains(norm)) ||
+                (norm.endsWith("s") && norm.dropLast(1) == syn) ||
+                (syn.endsWith("s") && syn.dropLast(1) == norm)
         }
     }
 
     fun onFrameLabels(candidates: List<Pair<String, Float>>): ProofStepResult {
-        val bestOverall = candidates.maxByOrNull { it.second }
-        val bestTargetMatch = candidates
+        val sortedCandidates = candidates.sortedByDescending { it.second }
+        val bestOverall = sortedCandidates.firstOrNull()
+        val bestTargetMatch = sortedCandidates
             .filter { (label, _) -> isMatch(label) }
-            .maxByOrNull { it.second }
+            .firstOrNull()
 
         val isTargetQualified = bestTargetMatch != null && bestTargetMatch.second >= confidenceThreshold
 
         return if (isTargetQualified) {
-            consecutiveHits += 1
+            consecutiveHits = minOf(requiredFrames, consecutiveHits + 1)
             if (consecutiveHits >= requiredFrames) {
                 ProofStepResult.Validated(
                     matchedLabel = bestTargetMatch!!.first,
@@ -69,7 +73,8 @@ class ProofFrameTracker(
                     matchedTargetLabel = bestTargetMatch!!.first,
                     matchedTargetConfidence = bestTargetMatch.second,
                     topSceneLabel = bestOverall?.first,
-                    topSceneConfidence = bestOverall?.second
+                    topSceneConfidence = bestOverall?.second,
+                    topCandidates = sortedCandidates.take(3)
                 )
             }
         } else {
@@ -80,7 +85,8 @@ class ProofFrameTracker(
                 matchedTargetLabel = bestTargetMatch?.first,
                 matchedTargetConfidence = bestTargetMatch?.second,
                 topSceneLabel = bestOverall?.first,
-                topSceneConfidence = bestOverall?.second
+                topSceneConfidence = bestOverall?.second,
+                topCandidates = sortedCandidates.take(3)
             )
         }
     }
