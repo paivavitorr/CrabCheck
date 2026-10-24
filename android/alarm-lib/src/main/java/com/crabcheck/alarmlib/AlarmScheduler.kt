@@ -19,7 +19,15 @@ import java.io.File
 
 object AlarmScheduler {
     const val EXTRA_ALARM_ID = "com.crabcheck.alarmlib.EXTRA_ALARM_ID"
+    const val EXTRA_IS_PRE_ALARM = "com.crabcheck.alarmlib.EXTRA_IS_PRE_ALARM"
+    const val PRE_ALARM_OFFSET_MS = 15L * 60L * 1000L // 15 minutos de aviso prévio
+    const val PRE_ALARM_CHANNEL_ID = "crabcheck_pre_alarm_channel"
     private const val REQ_RUNTIME_PERMISSION = 3001
+
+    @JvmStatic
+    fun preAlarmNotificationId(alarmId: String): Int {
+        return ("pre_alarm_$alarmId").hashCode()
+    }
 
     @JvmStatic
     fun dbPath(context: Context): String {
@@ -54,6 +62,40 @@ object AlarmScheduler {
 
         val clockInfo = AlarmManager.AlarmClockInfo(triggerAtEpochMs, showPi)
         alarmManager.setAlarmClock(clockInfo, operationPi)
+
+        // Agendamento do lembrete prévio de 15 minutos para estudo / leitura
+        val preReceiverIntent = Intent(context, AlarmReceiver::class.java).apply {
+            action = "com.crabcheck.alarmlib.ACTION_PRE_ALARM_$alarmId"
+            putExtra(EXTRA_ALARM_ID, alarmId)
+            putExtra(EXTRA_IS_PRE_ALARM, true)
+        }
+        val preOperationPi = PendingIntent.getBroadcast(
+            context,
+            ("pre_$alarmId").hashCode(),
+            preReceiverIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val preTriggerMs = triggerAtEpochMs - PRE_ALARM_OFFSET_MS
+        val now = System.currentTimeMillis()
+        if (preTriggerMs > now) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setExactAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP,
+                    preTriggerMs,
+                    preOperationPi
+                )
+            } else {
+                alarmManager.setExact(
+                    AlarmManager.RTC_WAKEUP,
+                    preTriggerMs,
+                    preOperationPi
+                )
+            }
+        } else {
+            alarmManager.cancel(preOperationPi)
+            preOperationPi.cancel()
+        }
     }
 
     @JvmStatic
@@ -74,6 +116,27 @@ object AlarmScheduler {
 
         alarmManager.cancel(operationPi)
         operationPi.cancel()
+
+        // Cancela o PendingIntent do pré-alarme e remove notificação ativa se houver
+        val preReceiverIntent = Intent(context, AlarmReceiver::class.java).apply {
+            action = "com.crabcheck.alarmlib.ACTION_PRE_ALARM_$alarmId"
+            putExtra(EXTRA_ALARM_ID, alarmId)
+            putExtra(EXTRA_IS_PRE_ALARM, true)
+        }
+        val preOperationPi = PendingIntent.getBroadcast(
+            context,
+            ("pre_$alarmId").hashCode(),
+            preReceiverIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        alarmManager.cancel(preOperationPi)
+        preOperationPi.cancel()
+
+        try {
+            val notificationManager = ContextCompat.getSystemService(context, NotificationManager::class.java)
+            notificationManager?.cancel(preAlarmNotificationId(alarmId))
+        } catch (_: Throwable) {
+        }
     }
 
     @JvmStatic

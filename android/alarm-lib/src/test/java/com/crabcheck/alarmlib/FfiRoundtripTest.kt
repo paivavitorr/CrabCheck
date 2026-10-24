@@ -189,4 +189,15 @@ class FfiRoundtripTest {
         assertEquals(1, remaining.size)
         assertEquals(note2.id, remaining[0].id)
     }
+
+    @Test
+    fun preAlarmConfiguration() {
+        assertEquals(15L * 60L * 1000L, AlarmScheduler.PRE_ALARM_OFFSET_MS)
+        assertEquals("crabcheck_pre_alarm_channel", AlarmScheduler.PRE_ALARM_CHANNEL_ID)
+        val notifId1 = AlarmScheduler.preAlarmNotificationId("study-01")
+        val notifId2 = AlarmScheduler.preAlarmNotificationId("study-02")
+        assertTrue(notifId1 != 0)
+        assertTrue(notifId1 != notifId2)
+        assertEquals(notifId1, AlarmScheduler.preAlarmNotificationId("study-01"))
+    }
 }
