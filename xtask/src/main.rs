@@ -295,7 +295,7 @@ fn build_and_patch_dioxus_android(root: &Path, is_release: bool) -> Result<()> {
         }
     }
 
-    let gen_android = find_dx_android_dir(root)?;
+    let gen_android = find_dx_android_dir(root, is_release)?;
     println!(
         "==> [4/4] Patching generated Android project at {} and assembling APK...",
         gen_android.display()
@@ -360,12 +360,17 @@ fn build_and_patch_dioxus_android(root: &Path, is_release: bool) -> Result<()> {
     Ok(())
 }
 
-fn find_dx_android_dir(root: &Path) -> Result<PathBuf> {
+fn find_dx_android_dir(root: &Path, is_release: bool) -> Result<PathBuf> {
     let target_dx = root.join("target/dx");
+    let modes = if is_release {
+        ["release", "debug"]
+    } else {
+        ["debug", "release"]
+    };
     if target_dx.exists() {
         for entry in fs::read_dir(&target_dx)? {
             let p = entry?.path();
-            for mode in ["debug", "release"] {
+            for mode in modes {
                 let candidate = p.join(mode).join("android/app");
                 if candidate.join("gradlew").exists() {
                     return Ok(candidate);
@@ -404,9 +409,39 @@ fn patch_dx_android_project(root: &Path, gen_android: &Path) -> Result<()> {
     let gradle_kts = gen_android.join("app/build.gradle.kts");
     if gradle_kts.exists() {
         let mut content = fs::read_to_string(&gradle_kts)?;
-        content = content.replace("minSdk = 24", "minSdk = 29");
+        content = content.replace("minSdk = 24", "minSdk = 26");
+        content = content.replace("minSdk = 29", "minSdk = 26");
         content = content.replace("compileSdk = 33", "compileSdk = 34");
         content = content.replace("targetSdk = 33", "targetSdk = 34");
+
+        // Enforce clean ABI filtering so only supported complete architectures are packaged
+        let abi_filters_block = r#"
+        ndk {
+            abiFilters.clear()
+            abiFilters.addAll(listOf("arm64-v8a", "x86_64"))
+        }
+"#;
+        if !content.contains("abiFilters.addAll") {
+            content = content.replace("defaultConfig {", &format!("defaultConfig {{{abi_filters_block}"));
+        }
+
+        // Exclude mismatched third-party 32-bit libraries (JNA, etc.)
+        let jni_packaging_block = r#"
+    packaging {
+        jniLibs {
+            excludes.addAll(listOf(
+                "lib/armeabi/**",
+                "lib/armeabi-v7a/**",
+                "lib/mips/**",
+                "lib/mips64/**",
+                "lib/x86/**"
+            ))
+        }
+    }
+"#;
+        if !content.contains("lib/armeabi/**") {
+            content = content.replace("android {", &format!("android {{{jni_packaging_block}"));
+        }
 
         let aar_dep = "implementation(files(\"libs/alarm-lib.aar\"))";
         if !content.contains(aar_dep) {
@@ -437,6 +472,8 @@ fn patch_dx_android_project(root: &Path, gen_android: &Path) -> Result<()> {
             keyPassword = "crabcheck2026"
             enableV1Signing = true
             enableV2Signing = true
+            enableV3Signing = true
+            enableV4Signing = false
         }
     }
 "#;
