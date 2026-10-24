@@ -87,16 +87,7 @@ object AlarmScheduler {
 
         val overlayOk = Settings.canDrawOverlays(context)
 
-        val enabledAccessibility = try {
-            Settings.Secure.getString(
-                context.contentResolver,
-                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-            ) ?: ""
-        } catch (_: Throwable) {
-            ""
-        }
-        val accessibilityOk =
-            enabledAccessibility.contains("com.crabcheck.alarmlib.AlarmAccessibilityService")
+        val accessibilityOk = true
 
         val cameraOk = ContextCompat.checkSelfPermission(
             context,

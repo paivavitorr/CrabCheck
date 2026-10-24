@@ -528,21 +528,10 @@ fn patch_dx_android_project(root: &Path, gen_android: &Path) -> Result<()> {
             android:name="com.crabcheck.alarmlib.AlarmAudioService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
-        <service
-            android:name="com.crabcheck.alarmlib.AlarmAccessibilityService"
-            android:exported="false"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
-            <intent-filter>
-                <action android:name="android.accessibilityservice.AccessibilityService" />
-            </intent-filter>
-            <meta-data
-                android:name="android.accessibilityservice"
-                android:resource="@xml/accessibility_service_config" />
-        </service>
         <activity
             android:name="com.crabcheck.alarmlib.LockActivity"
             android:exported="false"
-            android:showOnLockScreen="true"
+            android:showWhenLocked="true"
             android:turnScreenOn="true"
             android:launchMode="singleInstance"
             android:screenOrientation="portrait"
@@ -569,17 +558,6 @@ fn patch_dx_android_project(root: &Path, gen_android: &Path) -> Result<()> {
             android:name="com.crabcheck.alarmlib.AlarmAudioService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
-        <service
-            android:name="com.crabcheck.alarmlib.AlarmAccessibilityService"
-            android:exported="false"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
-            <intent-filter>
-                <action android:name="android.accessibilityservice.AccessibilityService" />
-            </intent-filter>
-            <meta-data
-                android:name="android.accessibilityservice"
-                android:resource="@xml/accessibility_service_config" />
-        </service>
     </application>"#;
                 manifest = manifest.replace("    </application>", extra_components);
             }
