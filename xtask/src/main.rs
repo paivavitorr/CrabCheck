@@ -324,11 +324,34 @@ fn build_and_patch_dioxus_android(root: &Path, is_release: bool) -> Result<()> {
 
     let apk_path = if is_release {
         let rel_apk = gen_android.join("app/build/outputs/apk/release/app-release.apk");
-        if !rel_apk.exists() {
+        let candidate = if !rel_apk.exists() {
             gen_android.join("app/build/outputs/apk/release/app-release-unsigned.apk")
         } else {
             rel_apk
+        };
+        let target_release = root.join("target/crabcheck-v0.1.0-release.apk");
+        if candidate.exists() {
+            fs::copy(&candidate, &target_release)?;
+            println!("==> Copied official release APK to: {}", target_release.display());
+            
+            // Verify signature using apksigner if available
+            let bt_root = sdk.join("build-tools");
+            if bt_root.exists() {
+                if let Ok(entries) = fs::read_dir(&bt_root) {
+                    for entry in entries.flatten() {
+                        let apksigner = entry.path().join("apksigner");
+                        if apksigner.exists() {
+                            println!("==> Verifying release APK signature with {}...", apksigner.display());
+                            let _ = Command::new(&apksigner)
+                                .args(["verify", "--verbose", "--print-certs", target_release.to_str().unwrap()])
+                                .status();
+                            break;
+                        }
+                    }
+                }
+            }
         }
+        target_release
     } else {
         gen_android.join("app/build/outputs/apk/debug/app-debug.apk")
     };
@@ -371,6 +394,13 @@ fn patch_dx_android_project(root: &Path, gen_android: &Path) -> Result<()> {
         let _ = fs::copy(&logo_src, res_drawable.join("crabcheck_logo.png"));
     }
 
+    // Copy official release keystore if present
+    let keystore_src = root.join("android/keystore/crabcheck-release.jks");
+    if keystore_src.exists() {
+        let keystore_dst = gen_android.join("app/crabcheck-release.jks");
+        fs::copy(&keystore_src, &keystore_dst)?;
+    }
+
     let gradle_kts = gen_android.join("app/build.gradle.kts");
     if gradle_kts.exists() {
         let mut content = fs::read_to_string(&gradle_kts)?;
@@ -396,7 +426,34 @@ fn patch_dx_android_project(root: &Path, gen_android: &Path) -> Result<()> {
             );
             content = content.replace("dependencies {", mlkit_deps);
         }
-        if !content.contains("signingConfig = signingConfigs.getByName(\"debug\")") {
+
+        if keystore_src.exists() {
+            let signing_block = r#"
+    signingConfigs {
+        create("release") {
+            storeFile = file("crabcheck-release.jks")
+            storePassword = "crabcheck2026"
+            keyAlias = "crabcheck"
+            keyPassword = "crabcheck2026"
+            enableV1Signing = true
+            enableV2Signing = true
+        }
+    }
+"#;
+            if !content.contains("create(\"release\")") {
+                content = content.replace("android {", &format!("android {{{signing_block}"));
+            }
+            content = content.replace(
+                "signingConfig = signingConfigs.getByName(\"debug\")",
+                "signingConfig = signingConfigs.getByName(\"release\")",
+            );
+            if !content.contains("signingConfig = signingConfigs.getByName(\"release\")") {
+                content = content.replace(
+                    "getByName(\"release\") {",
+                    "getByName(\"release\") {\n            signingConfig = signingConfigs.getByName(\"release\")",
+                );
+            }
+        } else if !content.contains("signingConfig = signingConfigs.getByName(\"debug\")") {
             content = content.replace(
                 "getByName(\"release\") {",
                 "getByName(\"release\") {\n            signingConfig = signingConfigs.getByName(\"debug\")",
