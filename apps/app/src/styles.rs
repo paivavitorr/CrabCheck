@@ -49,7 +49,7 @@ pub const GLOBAL_CSS: &str = r#"
         display: inline-flex;
         align-items: center;
         gap: 6px;
-        padding: 4px 10px;
+        padding: 5px 12px;
         border-radius: 999px;
         font-size: 12px;
         font-weight: 500;
@@ -57,6 +57,15 @@ pub const GLOBAL_CSS: &str = r#"
         color: #344054;
         border: 1px solid #E4E7EC;
         cursor: pointer;
+        transition: transform 0.1s ease, background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .health-pill:hover {
+        background: #EAECF0;
+        border-color: #D0D5DD;
+    }
+    .health-pill:active {
+        transform: scale(0.95);
+        background: #E4E7EC;
     }
     .dot-ok {
         width: 6px;
@@ -144,6 +153,16 @@ pub const GLOBAL_CSS: &str = r#"
         border-radius: 8px;
         font-size: 13px;
         font-weight: 500;
+        cursor: pointer;
+        transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1), background 0.15s ease, filter 0.12s ease, box-shadow 0.15s ease;
+    }
+    .btn-primary:hover {
+        background: #1D2939;
+        border-color: #1D2939;
+    }
+    .btn-primary:active {
+        transform: scale(0.96);
+        filter: brightness(0.88);
     }
     .btn-secondary {
         padding: 6px 11px;
@@ -153,6 +172,18 @@ pub const GLOBAL_CSS: &str = r#"
         border-radius: 7px;
         font-size: 12px;
         font-weight: 500;
+        cursor: pointer;
+        transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1), background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .btn-secondary:hover {
+        background: #F9FAFB;
+        border-color: #98A2B3;
+        color: #101828;
+    }
+    .btn-secondary:active {
+        transform: scale(0.95);
+        background: #F2F4F7;
+        border-color: #98A2B3;
     }
     .btn-danger-ghost {
         padding: 6px 11px;
@@ -162,6 +193,18 @@ pub const GLOBAL_CSS: &str = r#"
         border-radius: 7px;
         font-size: 12px;
         font-weight: 500;
+        cursor: pointer;
+        transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1), background 0.15s ease, border-color 0.15s ease;
+    }
+    .btn-danger-ghost:hover {
+        background: #FEF3F2;
+        border-color: #F04438;
+        color: #912018;
+    }
+    .btn-danger-ghost:active {
+        transform: scale(0.95);
+        background: #FEE4E2;
+        border-color: #D92D20;
     }
     .bottom-nav {
         position: fixed;
@@ -192,6 +235,15 @@ pub const GLOBAL_CSS: &str = r#"
         font-size: 11px;
         font-weight: 500;
         color: #667085;
+        cursor: pointer;
+        transition: transform 0.1s ease, color 0.15s ease;
+    }
+    .nav-item:hover {
+        color: #101828;
+    }
+    .nav-item:active {
+        transform: scale(0.92);
+        color: #101828;
     }
     .nav-item-active {
         color: #101828;

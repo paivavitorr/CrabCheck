@@ -194,7 +194,7 @@ pub fn TimelineView(
                                 }
                                 if let Some(lbl) = &out.matched_label {
                                     div {
-                                        style: "font-size: 12px; color: #475467;",
+                                        style: "font-size: 12px; color: #475467; margin-top: 2px;",
                                         if let Some(conf) = out.confidence {
                                             "Objeto validado: {lbl} ({conf * 100.0:.0}%)"
                                         } else {
@@ -202,10 +202,10 @@ pub fn TimelineView(
                                         }
                                     }
                                 }
-                                if let Some(path) = &out.proof_image_path {
+                                if out.proof_image_path.is_some() {
                                     div {
-                                        style: "font-size: 11px; color: #667085; word-break: break-all;",
-                                        "Ficheiro: {path}"
+                                        style: "font-size: 11px; color: #027A48; margin-top: 3px;",
+                                        "📸 Prova visual registada com sucesso"
                                     }
                                 }
                             }

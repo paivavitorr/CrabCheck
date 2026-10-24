@@ -441,6 +441,21 @@ fn App() -> Element {
                                 }
                             }
                         },
+                        on_force_delete_alarm: move |blocked_id: String| {
+                            let db = resolve_db_path();
+                            let now_ms = current_epoch_ms();
+                            if let Ok(store) = CoreStore::open(db) {
+                                match store.delete_alarm_force(&blocked_id, now_ms) {
+                                    Ok(()) => {
+                                        let _ = cancel_native_alarm(&blocked_id);
+                                        cooldown_blocked_id.set(None);
+                                        status_msg.set(String::from("Hábito Nível 3 forçado e eliminado com sucesso."));
+                                        reload_all(None);
+                                    }
+                                    Err(err) => status_msg.set(format!("Erro ao forçar eliminação: {err}")),
+                                }
+                            }
+                        },
                         on_save_alarm: move |_| save_alarm(()),
                         on_cancel_edit: move |_| reset_form(),
                         on_edit_alarm: move |item: AlarmSpec| {

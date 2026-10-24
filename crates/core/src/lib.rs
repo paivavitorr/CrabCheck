@@ -832,6 +832,23 @@ impl CoreStore {
         Ok(())
     }
 
+    pub fn delete_alarm_force(&self, alarm_id: &str, now_epoch_ms: i64) -> Result<()> {
+        let affected = self.conn.execute(
+            "UPDATE alarms
+             SET enabled = 0,
+                 cooldown_unlock_at_epoch_ms = NULL,
+                 deleted_at_epoch_ms = ?2,
+                 updated_at_epoch_ms = ?2
+             WHERE id = ?1 AND deleted_at_epoch_ms IS NULL",
+            params![alarm_id, now_epoch_ms],
+        )?;
+
+        if affected == 0 {
+            return Err(CoreError::NotFound(alarm_id.to_string()));
+        }
+        Ok(())
+    }
+
     pub fn reschedule_after_trigger(
         &self,
         alarm_id: &str,

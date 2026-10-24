@@ -739,6 +739,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -759,6 +761,8 @@ internal interface UniffiLib : Library {
     fun uniffi_crabcheck_core_ffi_fn_func_ffi_curated_synonyms_for(`targetLabel`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_crabcheck_core_ffi_fn_func_ffi_delete_alarm(`dbPath`: RustBuffer.ByValue,`alarmId`: RustBuffer.ByValue,`nowEpochMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    fun uniffi_crabcheck_core_ffi_fn_func_ffi_delete_alarm_force(`dbPath`: RustBuffer.ByValue,`alarmId`: RustBuffer.ByValue,`nowEpochMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_crabcheck_core_ffi_fn_func_ffi_delete_note(`dbPath`: RustBuffer.ByValue,`noteId`: RustBuffer.ByValue,`nowEpochMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
@@ -900,6 +904,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_crabcheck_core_ffi_checksum_func_ffi_delete_alarm(
     ): Short
+    fun uniffi_crabcheck_core_ffi_checksum_func_ffi_delete_alarm_force(
+    ): Short
     fun uniffi_crabcheck_core_ffi_checksum_func_ffi_delete_note(
     ): Short
     fun uniffi_crabcheck_core_ffi_checksum_func_ffi_get_alarm(
@@ -946,6 +952,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_crabcheck_core_ffi_checksum_func_ffi_delete_alarm() != 38070.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_crabcheck_core_ffi_checksum_func_ffi_delete_alarm_force() != 5992.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_crabcheck_core_ffi_checksum_func_ffi_delete_note() != 30406.toShort()) {
@@ -1688,6 +1697,15 @@ public object FfiConverterSequenceTypeFfiQuickNoteDto: FfiConverterRustBuffer<Li
         = 
     uniffiRustCallWithError(FfiException) { _status ->
     UniffiLib.INSTANCE.uniffi_crabcheck_core_ffi_fn_func_ffi_delete_alarm(
+        FfiConverterString.lower(`dbPath`),FfiConverterString.lower(`alarmId`),FfiConverterLong.lower(`nowEpochMs`),_status)
+}
+    
+    
+
+    @Throws(FfiException::class) fun `ffiDeleteAlarmForce`(`dbPath`: kotlin.String, `alarmId`: kotlin.String, `nowEpochMs`: kotlin.Long)
+        = 
+    uniffiRustCallWithError(FfiException) { _status ->
+    UniffiLib.INSTANCE.uniffi_crabcheck_core_ffi_fn_func_ffi_delete_alarm_force(
         FfiConverterString.lower(`dbPath`),FfiConverterString.lower(`alarmId`),FfiConverterLong.lower(`nowEpochMs`),_status)
 }
     

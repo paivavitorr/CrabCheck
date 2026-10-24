@@ -48,6 +48,7 @@ pub fn HabitsView(
     grace_window_minutes: u16,
     on_goto_permissions: EventHandler<()>,
     on_request_cooldown_unlock: EventHandler<String>,
+    on_force_delete_alarm: EventHandler<String>,
     on_save_alarm: EventHandler<()>,
     on_cancel_edit: EventHandler<()>,
     on_edit_alarm: EventHandler<AlarmSpec>,
@@ -62,6 +63,9 @@ pub fn HabitsView(
     on_update_level: EventHandler<AlarmLevel>,
     on_update_target: EventHandler<String>,
 ) -> Element {
+    let blocked_id_for_request = cooldown_blocked_id.clone();
+    let blocked_id_for_force = cooldown_blocked_id.clone();
+
     rsx! {
         div {
             if permission_blocked_n3 {
@@ -79,17 +83,37 @@ pub fn HabitsView(
                 }
             }
 
-            if let Some(blocked_id) = cooldown_blocked_id {
+            if cooldown_blocked_id.is_some() {
                 div {
-                    style: "background: #FFFAEB; border: 1px solid #FEDF89; padding: 12px; border-radius: 10px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; gap: 10px;",
-                    span {
-                        style: "font-size: 12px; color: #93370D;",
-                        "Hábito Nível 3 protegido por bloqueio de 24 horas."
+                    style: "background: #FFFAEB; border: 1px solid #FEDF89; padding: 14px; border-radius: 10px; margin-bottom: 14px; display: flex; flex-direction: column; gap: 10px;",
+                    div {
+                        style: "font-size: 13px; font-weight: 600; color: #B54708;",
+                        "🛡️ Hábito Nível 3 protegido por bloqueio"
                     }
-                    button {
-                        class: "btn-secondary",
-                        onclick: move |_| on_request_cooldown_unlock.call(blocked_id.clone()),
-                        "Solicitar desbloqueio (24h)"
+                    div {
+                        style: "font-size: 12px; color: #475467; line-height: 1.4;",
+                        "Para evitar desistir de acordar com preguiça, o Nível 3 trava edições impulsivas. Pode pedir o desbloqueio normal ou forçar a eliminação definitiva agora."
+                    }
+                    div {
+                        style: "display: flex; gap: 8px; flex-wrap: wrap;",
+                        button {
+                            class: "btn-secondary",
+                            onclick: move |_| {
+                                if let Some(id) = &blocked_id_for_request {
+                                    on_request_cooldown_unlock.call(id.clone());
+                                }
+                            },
+                            "Pedir desbloqueio (24h)"
+                        }
+                        button {
+                            class: "btn-danger-ghost",
+                            onclick: move |_| {
+                                if let Some(id) = &blocked_id_for_force {
+                                    on_force_delete_alarm.call(id.clone());
+                                }
+                            },
+                            "Forçar eliminação agora"
+                        }
                     }
                 }
             }

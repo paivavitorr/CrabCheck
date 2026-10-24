@@ -142,6 +142,17 @@ pub fn ffi_delete_alarm(
 }
 
 #[uniffi::export]
+pub fn ffi_delete_alarm_force(
+    db_path: String,
+    alarm_id: String,
+    now_epoch_ms: i64,
+) -> Result<(), FfiError> {
+    let store = CoreStore::open(&db_path)?;
+    store.delete_alarm_force(&alarm_id, now_epoch_ms)?;
+    Ok(())
+}
+
+#[uniffi::export]
 pub fn ffi_request_cooldown_unlock(
     db_path: String,
     alarm_id: String,
